@@ -1,0 +1,45 @@
+# ---- Maven ----
+target/
+*.class
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+release.properties
+dependency-reduced-pom.xml
+# Keep the Maven wrapper jar (it must be committed for reproducible builds)
+!.mvn/wrapper/maven-wrapper.jar
+
+# ---- Java / JVM ----
+*.log
+hs_err_pid*
+replay_pid*
+
+# ---- IDEs ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+nbproject/
+.factorypath
+
+# ---- OS junk ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ---- Spark / Derby (Phase 7) ----
+spark-warehouse/
+derby.log
+metastore_db/
+
+# ---- Local env / secrets ----
+.env
+*.local
