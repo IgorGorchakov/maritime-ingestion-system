@@ -8,6 +8,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import org.springframework.kafka.support.Acknowledgment;
+
 import java.util.List;
 import java.util.Random;
 
@@ -34,7 +36,7 @@ public class RiskScorerService {
     }
 
     @KafkaListener(topics = "maritime.ais.raw", groupId = "streaming-service")
-    public void consumeAndScore(VesselEvent event) {
+    public void consumeAndScore(VesselEvent event, Acknowledgment ack) {
         System.out.println("Received event for MMSI: " + event.getMmsi());
 
         // 1. Check if in restricted zone
@@ -72,7 +74,17 @@ public class RiskScorerService {
                 .build();
 
         // 5. Send to enriched topic
-        kafkaTemplate.send(ENRICHED_TOPIC, event.getMmsi(), enrichedEvent);
-        System.out.println("Sent enriched event for MMSI: " + event.getMmsi() + " with risk level: " + riskLevel);
+        kafkaTemplate.send(ENRICHED_TOPIC, event.getMmsi(), enrichedEvent).whenComplete((result, ex) -> {
+            if (ex == null) {
+                // Only acknowledge after the side-effect (produce) succeeds.
+                // With MANUAL_IMMEDIATE ack mode this commits the offset,
+                // guaranteeing at-least-once delivery.
+                ack.acknowledge();
+                System.out.println("Sent enriched event for MMSI: " + event.getMmsi() + " with risk level: " + enrichedEvent.getRiskLevel());
+            } else {
+                System.err.println("Failed to send enriched event for MMSI " + event.getMmsi() + ": " + ex.getMessage());
+                // Don't ack — the record will be redelivered.
+            }
+        });
     }
 }
