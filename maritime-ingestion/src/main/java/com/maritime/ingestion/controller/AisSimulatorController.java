@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -16,8 +17,12 @@ public class AisSimulatorController {
 
     private static final String TOPIC = "maritime.ais.raw";
     private final KafkaTemplate<String, VesselEvent> kafkaTemplate;
+    // One long-lived executor for the bean's lifetime. We cancel the scheduled task on
+    // stop rather than shutting the executor down, so start/stop/start works (a
+    // shut-down executor can never be reused -> RejectedExecutionException).
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
+    private volatile ScheduledFuture<?> task;
 
     @Autowired
     public AisSimulatorController(KafkaTemplate<String, VesselEvent> kafkaTemplate) {
@@ -27,7 +32,7 @@ public class AisSimulatorController {
     @PostMapping("/start")
     public String startSimulation() {
         if (isRunning.compareAndSet(false, true)) {
-            scheduler.scheduleAtFixedRate(this::generateAndSendEvent, 0, 1, TimeUnit.SECONDS);
+            task = scheduler.scheduleAtFixedRate(this::generateAndSendEvent, 0, 1, TimeUnit.SECONDS);
             return "Simulation started";
         }
         return "Simulation is already running";
@@ -36,7 +41,9 @@ public class AisSimulatorController {
     @PostMapping("/stop")
     public String stopSimulation() {
         if (isRunning.compareAndSet(true, false)) {
-            scheduler.shutdown();
+            if (task != null) {
+                task.cancel(false);
+            }
             return "Simulation stopped";
         }
         return "Simulation is not running";

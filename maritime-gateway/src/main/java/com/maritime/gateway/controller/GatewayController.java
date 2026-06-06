@@ -3,6 +3,7 @@ package com.maritime.gateway.controller;
 import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.serde.AvroJson;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -20,11 +21,11 @@ public class GatewayController {
         this.storageServiceUrl = storageServiceUrl;
     }
 
-    @GetMapping("/{mmsi}")
-    public ResponseEntity<EnrichedVesselEvent> getVesselIntelligence(@PathVariable String mmsi) {
-        // Storage returns Avro-JSON; fetch it as a raw String and decode with the
-        // shared Avro codec. Jackson can't round-trip an Avro SpecificRecord, so we
-        // deliberately avoid binding straight to EnrichedVesselEvent.class here.
+    @GetMapping(value = "/{mmsi}", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> getVesselIntelligence(@PathVariable String mmsi) {
+        // Storage returns Avro-JSON; fetch it as a raw String. Jackson cannot
+        // round-trip an Avro SpecificRecord, so we never bind to the class for
+        // transport — on either the request or the response side.
         String json = restTemplate.getForObject(
                 storageServiceUrl + "/api/v1/vessels/" + mmsi,
                 String.class
@@ -32,7 +33,10 @@ public class GatewayController {
         if (json == null || json.isBlank()) {
             return ResponseEntity.notFound().build();
         }
+        // Decode then re-encode through the shared Avro codec: this validates the
+        // payload against the schema (the gateway is a real contract boundary, not a
+        // dumb proxy) and is where future aggregation/enrichment would hook in.
         EnrichedVesselEvent vesselData = AvroJson.fromJson(json, EnrichedVesselEvent.class);
-        return ResponseEntity.ok(vesselData);
+        return ResponseEntity.ok(AvroJson.toJson(vesselData));
     }
 }

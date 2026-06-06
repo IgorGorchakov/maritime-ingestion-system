@@ -104,6 +104,11 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <configuration>
+                        <!-- Retain method parameter names in bytecode. Spring MVC needs them to
+                             bind @PathVariable/@RequestParam without an explicit name; we don't
+                             inherit spring-boot-starter-parent (which would add this), so set it
+                             ourselves. Without it, /vessels/{mmsi} fails at runtime. -->
+                        <parameters>true</parameters>
                         <!-- JDK 23+ no longer runs classpath annotation processors implicitly,
                              so Lombok must be declared on the processor path explicitly. -->
                         <annotationProcessorPaths>
