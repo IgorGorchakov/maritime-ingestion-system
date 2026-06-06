@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "name": "VesselEvent",
+  "namespace": "com.maritime.common.dto",
+  "doc": "A single raw AIS/satellite position report for one vessel.",
+  "fields": [
+    {
+      "name": "mmsi",
+      "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "Maritime Mobile Service Identity (9 digits) - the vessel's unique radio id."
+    },
+    { "name": "latitude",  "type": "double", "doc": "Decimal degrees, -90..90." },
+    { "name": "longitude", "type": "double", "doc": "Decimal degrees, -180..180." },
+    { "name": "speed",     "type": "double", "doc": "Speed over ground, knots." },
+    { "name": "heading",   "type": "double", "doc": "Course over ground, degrees 0..360." },
+    {
+      "name": "timestamp",
+      "type": { "type": "long", "logicalType": "timestamp-millis" },
+      "doc": "Report time. timestamp-millis logical type maps to java.time.Instant."
+    },
+    {
+      "name": "eventType",
+      "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "Source/kind of report, e.g. AIS, SATELLITE."
+    }
+  ]
+}

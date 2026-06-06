@@ -62,13 +62,13 @@ public class RiskScorerService {
         }
 
         // 4. Build enriched event
-        EnrichedVesselEvent enrichedEvent = EnrichedVesselEvent.builder()
-                .vesselEvent(event)
-                .inRestrictedZone(inRestrictedZone)
-                .zoneName(inRestrictedZone ? "Restricted Zone Alpha" : "Normal Waters")
-                .distanceToPort(distanceToPort)
-                .riskScore(riskScore)
-                .riskLevel(riskLevel)
+        EnrichedVesselEvent enrichedEvent = EnrichedVesselEvent.newBuilder()
+                .setVesselEvent(event)
+                .setInRestrictedZone(inRestrictedZone)
+                .setZoneName(inRestrictedZone ? "Restricted Zone Alpha" : "Normal Waters")
+                .setDistanceToPort(distanceToPort)
+                .setRiskScore(riskScore)
+                .setRiskLevel(riskLevel)
                 .build();
 
         // 5. Send to enriched topic

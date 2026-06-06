@@ -32,5 +32,50 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- Generated VesselEvent/EnrichedVesselEvent extend SpecificRecordBase, so
+             the Avro runtime is a compile-time dependency of this shared module. -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+        </dependency>
+        <!-- KafkaAvroSerializer/Deserializer + registry client, shared by every
+             service that produces or consumes these records. -->
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiles src/main/avro/*.avsc into Java SpecificRecords before compile.
+                 jsr310 => timestamp-millis maps to java.time.Instant (not long);
+                 stringType=String => getters return String, not CharSequence, so MMSI
+                 stays usable as a Kafka key and in string concatenation. -->
+            <plugin>
+                <groupId>org.apache.avro</groupId>
+                <artifactId>avro-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>schemas</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>schema</goal>
+                        </goals>
+                        <configuration>
+                            <sourceDirectory>${project.basedir}/src/main/avro</sourceDirectory>
+                            <stringType>String</stringType>
+                            <enableDecimalLogicalType>true</enableDecimalLogicalType>
+                            <dateTimeLogicalTypeImplementation>jsr310</dateTimeLogicalTypeImplementation>
+                            <!-- EnrichedVesselEvent references VesselEvent by full name;
+                                 compile VesselEvent first so the type resolves. -->
+                            <imports>
+                                <import>${project.basedir}/src/main/avro/VesselEvent.avsc</import>
+                            </imports>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

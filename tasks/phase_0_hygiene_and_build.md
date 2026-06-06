@@ -1,7 +1,7 @@
 # Phase 0: Hygiene & Build Foundation
 
 > Part of the senior-MVP roadmap in `PLAN.md`. Sequence: **0** → 1 → … → 8.
-> Status: ☐ Not started
+> Status: ☑ Done (commit 81bc7d3) — fresh `./mvnw clean verify` green across all 6 modules.
 
 ## Objective
 Establish baseline engineering hygiene and reproducible builds before any feature work.

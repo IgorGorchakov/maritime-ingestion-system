@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "name": "EnrichedVesselEvent",
+  "namespace": "com.maritime.common.dto",
+  "doc": "A raw VesselEvent enriched by the streaming service with zone + risk context.",
+  "fields": [
+    {
+      "name": "vesselEvent",
+      "type": "com.maritime.common.dto.VesselEvent",
+      "doc": "The original raw report. Compiled from VesselEvent.avsc via the plugin's import."
+    },
+    { "name": "inRestrictedZone", "type": "boolean", "doc": "True if the position falls in a restricted geofence." },
+    {
+      "name": "zoneName",
+      "type": [ "null", { "type": "string", "avro.java.string": "String" } ],
+      "default": null,
+      "doc": "Human-readable zone label, null if none. Union-with-null = nullable + BACKWARD-friendly."
+    },
+    { "name": "distanceToPort", "type": "double", "doc": "Nautical miles to nearest port (estimated)." },
+    { "name": "riskScore",      "type": "double", "doc": "Computed risk score." },
+    {
+      "name": "riskLevel",
+      "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "LOW | MEDIUM | HIGH."
+    }
+  ]
+}

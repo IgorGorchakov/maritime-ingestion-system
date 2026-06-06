@@ -43,14 +43,14 @@ public class AisSimulatorController {
     }
 
     private void generateAndSendEvent() {
-        VesselEvent event = VesselEvent.builder()
-                .mmsi(String.valueOf((int) (Math.random() * 90000000) + 10000000))
-                .latitude(30.0 + Math.random() * 10.0) // Random lat between 30 and 40
-                .longitude(-90.0 + Math.random() * 10.0) // Random lon between -90 and -80
-                .speed(5.0 + Math.random() * 15.0)
-                .heading(Math.random() * 360)
-                .timestamp(java.time.Instant.now())
-                .eventType("AIS")
+        VesselEvent event = VesselEvent.newBuilder()
+                .setMmsi(String.valueOf((int) (Math.random() * 90000000) + 10000000))
+                .setLatitude(30.0 + Math.random() * 10.0) // Random lat between 30 and 40
+                .setLongitude(-90.0 + Math.random() * 10.0) // Random lon between -90 and -80
+                .setSpeed(5.0 + Math.random() * 15.0)
+                .setHeading(Math.random() * 360)
+                .setTimestamp(java.time.Instant.now())
+                .setEventType("AIS")
                 .build();
 
         // Use MMSI as key for partitioning
