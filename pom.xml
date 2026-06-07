@@ -36,6 +36,7 @@
              and registry stay on one consistent Confluent Platform line. -->
         <avro.version>1.11.3</avro.version>
         <confluent.version>7.5.1</confluent.version>
+        <caffeine.version>3.1.8</caffeine.version>
     </properties>
 
     <!-- Confluent hosts kafka-avro-serializer + the registry client here;
@@ -74,6 +75,11 @@
                 <groupId>io.confluent</groupId>
                 <artifactId>kafka-avro-serializer</artifactId>
                 <version>${confluent.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.ben-manes.caffeine</groupId>
+                <artifactId>caffeine</artifactId>
+                <version>${caffeine.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
