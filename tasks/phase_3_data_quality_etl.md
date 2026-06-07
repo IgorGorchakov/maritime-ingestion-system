@@ -1,7 +1,7 @@
 # Phase 3: Data Quality / ETL — Extract → Validate → Transform → Load
 
 > Part of the senior-MVP roadmap in `PLAN.md`. Sequence: 0 → 1 → 2 → **3** → … → 8.
-> Status: ☐ Not started
+> Status: ◐ Code-complete, uncommitted — Validator + DedupService + quarantine topic + E→V→T→L ordering in place; compiles green. Fixed during review: DedupService.isDuplicate always returned false (now putIfAbsent); Validator + DedupService were never registered as beans (now PipelineConfig). ⚠ Open: quarantine path acks before the async send completes (events lost if quarantine produce fails). ⚠ Runtime checks (bad record→quarantine w/ reason header; replay→enriched once) not yet executed.
 
 ## Objective
 Insert an explicit validation + dedup stage before enrichment, quarantining bad data instead of crashing.

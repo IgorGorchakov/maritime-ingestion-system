@@ -1,7 +1,7 @@
 # Phase 1: Schema & Contracts — Avro + Confluent Schema Registry (KEYSTONE)
 
 > Part of the senior-MVP roadmap in `PLAN.md`. Sequence: 0 → **1** → … → 8.
-> Status: ☐ Not started
+> Status: ☑ Code-complete (commits 281d777, 0376b00) — Avro end-to-end, registry on 8085; compiles green. ⚠ Runtime acceptance checks (curl /subjects, 409 on incompatible schema, full pipeline flow) not yet executed against a running stack.
 
 ## Objective
 Replace Java-serialized DTOs sent via Spring `JsonSerializer` with Avro records governed by a Schema Registry.

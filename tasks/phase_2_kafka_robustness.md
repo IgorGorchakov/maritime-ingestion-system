@@ -1,7 +1,7 @@
 # Phase 2: Kafka Robustness — Idempotent Producer, Manual Acks, DLQ
 
 > Part of the senior-MVP roadmap in `PLAN.md`. Sequence: 0 → 1 → **2** → … → 8.
-> Status: ☐ Not started
+> Status: ◐ Mostly implemented (commit 0ca80d7 + uncommitted config/ packages) — idempotent producer, MANUAL_IMMEDIATE, DefaultErrorHandler + DLT wired in streaming & storage; compiles green. ⚠ Gap: storage listener (VesselController.consumeEnrichedEvent) takes no Acknowledgment and swallows exceptions via printStackTrace, so its DLT/no-loss guarantee is weaker than the streaming side. ⚠ Runtime checks (poison→DLT, kill-mid-batch→no loss) not yet executed.
 
 ## Objective
 Make the streaming layer production-grade: no message loss, no head-of-line blocking on poison messages, explicit Kafka configuration in code.
