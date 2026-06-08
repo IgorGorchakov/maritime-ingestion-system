@@ -1,5 +1,8 @@
 package com.maritime.storage.config;
 
+import com.maritime.common.observability.CorrelationIdRecordInterceptor;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,9 +31,12 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.group-id:storage-service}")
     private String groupId;
 
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String bootstrapServers;
+
     private Map<String, Object> consumerProps(String groupId) {
         Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "${spring.kafka.bootstrap-servers:localhost:9092}");
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
@@ -49,20 +55,33 @@ public class KafkaConsumerConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
             ConsumerFactory<String, Object> consumerFactory,
-            KafkaTemplate<String, Object> kafkaTemplate) {
+            KafkaTemplate<String, Object> kafkaTemplate,
+            CorrelationIdRecordInterceptor correlationIdRecordInterceptor,
+            MeterRegistry meterRegistry) {
 
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
 
+        // Bind the correlation id off each record's header into MDC before the listener
+        // runs, so log lines carry the same id that originated upstream at ingestion.
+        factory.setRecordInterceptor(correlationIdRecordInterceptor);
+
         // MANUAL_IMMEDIATE: offset committed only after listener returns successfully.
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+
+        // Count every record diverted to a DLT — a non-zero rate is an alarm signal.
+        Counter dlqCounter = Counter.builder("dlq")
+                .description("Records routed to a dead-letter topic after exhausting retries")
+                .register(meterRegistry);
 
         // DLQ: poison records go to <topic>.DLT instead of blocking the partition.
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
                 kafkaTemplate,
-                (record, exception) -> new TopicPartition(
-                        record.topic() + ".DLT", 0));
+                (record, exception) -> {
+                    dlqCounter.increment();
+                    return new TopicPartition(record.topic() + ".DLT", 0);
+                });
         factory.setCommonErrorHandler(new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 3)));
 
         return factory;

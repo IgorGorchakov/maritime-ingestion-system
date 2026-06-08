@@ -1,5 +1,6 @@
 package com.maritime.ingestion.config;
 
+import com.maritime.common.observability.CorrelationIdProducerInterceptor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,9 +20,12 @@ public class KafkaProducerConfig {
     @Value("${schema.registry.url:http://localhost:8085}")
     private String schemaRegistryUrl;
 
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String bootstrapServers;
+
     private Map<String, Object> producerProps() {
         Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "${spring.kafka.bootstrap-servers:localhost:9092}");
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         // Idempotent producer: dedupes retries via PID + sequence numbers.
         // Combined with acks=all this guarantees no message loss within a partition.
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
@@ -32,6 +36,9 @@ public class KafkaProducerConfig {
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaAvroSerializer.class);
         props.put("schema.registry.url", schemaRegistryUrl);
+        // Stamp the correlation-id header on every record so it survives the Kafka hop.
+        props.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
+                CorrelationIdProducerInterceptor.class.getName());
         return props;
     }
 

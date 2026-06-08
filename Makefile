@@ -14,7 +14,7 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 ## ---- Infrastructure (Docker Compose) ----
-up: ## Start infra (Kafka, LocalStack, Postgres/PostGIS) in the background
+up: ## Start infra (Kafka, LocalStack, Postgres, Prometheus :9090, Grafana :3000)
 	docker compose up -d
 
 down: ## Stop infra and remove containers

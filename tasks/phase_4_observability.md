@@ -1,7 +1,7 @@
 # Phase 4: Observability — Micrometer + Prometheus + Grafana + Structured Logs
 
 > Part of the senior-MVP roadmap in `PLAN.md`. Sequence: 0 → 1 → 2 → 3 → **4** → … → 8.
-> Status: ☐ Not started
+> Status: ☑ Done — verified live 2026-06-08 (counters increment under load; correlation id traced ingestion→streaming→storage).
 
 ## Objective
 Make the platform measurable and debuggable: metrics on every service, dashboards, and correlation-id tracing across services.

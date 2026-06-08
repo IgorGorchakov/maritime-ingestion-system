@@ -5,6 +5,7 @@ import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.dto.VesselEvent;
 import com.maritime.common.serde.AvroJson;
 import com.maritime.storage.service.AwsStorageService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1")
 public class VesselController {
@@ -51,7 +53,8 @@ public class VesselController {
             awsStorageService.saveToDynamoDB(item);
 
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("Failed to persist enriched event for MMSI {}: {}",
+                    event.getVesselEvent().getMmsi(), e.getMessage(), e);
         }
     }
 

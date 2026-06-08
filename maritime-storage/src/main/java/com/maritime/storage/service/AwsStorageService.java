@@ -21,6 +21,7 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+@Slf4j
 @Service
 public class AwsStorageService {
 
@@ -71,7 +73,7 @@ public class AwsStorageService {
     public void initResources() {
         if (!s3Client.doesBucketExistV2(bucketName)) {
             s3Client.createBucket(bucketName);
-            System.out.println("Created S3 bucket: " + bucketName);
+            log.info("Created S3 bucket: {}", bucketName);
         }
 
         try {
@@ -80,7 +82,7 @@ public class AwsStorageService {
                     .withKeySchema(new KeySchemaElement("mmsi", KeyType.HASH))
                     .withAttributeDefinitions(new AttributeDefinition("mmsi", ScalarAttributeType.S))
                     .withProvisionedThroughput(new ProvisionedThroughput(5L, 5L)));
-            System.out.println("Created DynamoDB table: " + tableName);
+            log.info("Created DynamoDB table: {}", tableName);
         } catch (ResourceInUseException e) {
             // Table already exists, nothing to do.
         }
@@ -92,12 +94,12 @@ public class AwsStorageService {
         metadata.setContentLength(bytes.length);
         metadata.setContentType("application/json");
         s3Client.putObject(bucketName, key, new ByteArrayInputStream(bytes), metadata);
-        System.out.println("Saved to S3: " + key);
+        log.info("Saved to S3: {}", key);
     }
 
     public void saveToDynamoDB(Map<String, AttributeValue> item) {
         dynamoDBClient.putItem(tableName, item);
-        System.out.println("Saved to DynamoDB: " + tableName);
+        log.info("Saved to DynamoDB: {}", tableName);
     }
 
     /**

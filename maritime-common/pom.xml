@@ -44,6 +44,14 @@
             <groupId>io.confluent</groupId>
             <artifactId>kafka-avro-serializer</artifactId>
         </dependency>
+        <!-- JSON log encoder referenced by the shared logback-spring.xml. Declared
+             here (not per-service) so every module that depends on common resolves
+             the encoder on its classpath when Spring Boot loads the config. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash-logback-encoder.version}</version>
+        </dependency>
     </dependencies>
 
     <build>

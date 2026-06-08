@@ -37,6 +37,10 @@
         <avro.version>1.11.3</avro.version>
         <confluent.version>7.5.1</confluent.version>
         <caffeine.version>3.1.8</caffeine.version>
+        <!-- Structured JSON logging. Logback itself is transitive via Spring Boot;
+             this encoder turns each event into a single JSON line (incl. MDC), so
+             logs are queryable across services. 7.4 is the last 7.x on Logback 1.4. -->
+        <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
     </properties>
 
     <!-- Confluent hosts kafka-avro-serializer + the registry client here;
