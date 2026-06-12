@@ -16,12 +16,36 @@
       "default": null,
       "doc": "Human-readable zone label, null if none. Union-with-null = nullable + BACKWARD-friendly."
     },
+    {
+      "name": "zoneType",
+      "type": [ "null", { "type": "string", "avro.java.string": "String" } ],
+      "default": null,
+      "doc": "Zone classification from PostGIS catalog: EEZ | RESTRICTED | PORT | null. Added Phase 6; BACKWARD-compatible (default null)."
+    },
     { "name": "distanceToPort", "type": "double", "doc": "Nautical miles to nearest port (estimated)." },
     { "name": "riskScore",      "type": "double", "doc": "Computed risk score." },
     {
       "name": "riskLevel",
       "type": { "type": "string", "avro.java.string": "String" },
       "doc": "LOW | MEDIUM | HIGH."
+    },
+    {
+      "name": "loitering",
+      "type": "boolean",
+      "default": false,
+      "doc": "True when the vessel has been drifting at low speed in a tight area. Added Phase 6; BACKWARD-compatible (default false)."
+    },
+    {
+      "name": "darkVessel",
+      "type": "boolean",
+      "default": false,
+      "doc": "True when AIS reports stopped unexpectedly for >= the dark-vessel threshold. Added Phase 6; BACKWARD-compatible (default false)."
+    },
+    {
+      "name": "speedAnomaly",
+      "type": "boolean",
+      "default": false,
+      "doc": "True when the implied speed (derived from consecutive positions) diverges significantly from the reported SOG. Added Phase 6; BACKWARD-compatible (default false)."
     }
   ]
 }

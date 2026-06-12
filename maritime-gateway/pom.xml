@@ -28,6 +28,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Phase 7: JdbcTemplate for querying Spark batch rollup tables in PostGIS -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <!-- Renders Micrometer meters at /actuator/prometheus. -->
         <dependency>
             <groupId>io.micrometer</groupId>

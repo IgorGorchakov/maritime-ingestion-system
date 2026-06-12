@@ -10,11 +10,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Consumes enriched vessel events from Kafka and persists them to:
+ * <ul>
+ *   <li><b>S3 (cold tier, Parquet):</b> one file per event, partitioned by
+ *       {@code date=/mmsi=} for Spark partition pruning (Phase 7).</li>
+ *   <li><b>DynamoDB (hot tier):</b> latest state per MMSI for real-time REST queries.</li>
+ * </ul>
+ */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1")
@@ -27,71 +36,106 @@ public class VesselController {
         this.awsStorageService = awsStorageService;
     }
 
+    /**
+     * Consumes base enriched events (zone + risk, no detection flags).
+     * This is the primary cold + hot tier write path for every vessel event.
+     */
     @KafkaListener(topics = "maritime.enriched", groupId = "storage-service")
-    public void consumeEnrichedEvent(EnrichedVesselEvent event) {
-        try {
-            VesselEvent vessel = event.getVesselEvent();
-            // Avro-JSON: the schema embedded in the record stays the source of truth
-            // on the cold tier (Phase 7 switches this S3 format to Parquet).
-            String json = AvroJson.toJson(event);
-            String key = vessel.getMmsi() + "/" + vessel.getTimestamp().toEpochMilli();
-
-            // Save to "cold" storage (S3)
-            awsStorageService.saveToS3("vessel-events/" + key + ".json", json);
-
-            // Save to "hot" storage (DynamoDB) - latest state per vessel
-            Map<String, AttributeValue> item = new HashMap<>();
-            item.put("mmsi", new AttributeValue().withS(vessel.getMmsi()));
-            item.put("riskLevel", new AttributeValue().withS(event.getRiskLevel()));
-            item.put("riskScore", new AttributeValue().withN(String.valueOf(event.getRiskScore())));
-            item.put("inRestrictedZone", new AttributeValue().withBOOL(event.getInRestrictedZone()));
-            if (event.getZoneName() != null) {
-                // zoneName is a nullable Avro union; DynamoDB rejects a null S value.
-                item.put("zoneName", new AttributeValue().withS(event.getZoneName()));
-            }
-            item.put("payload", new AttributeValue().withS(json));
-            awsStorageService.saveToDynamoDB(item);
-
-        } catch (Exception e) {
-            log.error("Failed to persist enriched event for MMSI {}: {}",
-                    event.getVesselEvent().getMmsi(), e.getMessage(), e);
-        }
+    public void consumeEnrichedEvent(EnrichedVesselEvent event, Acknowledgment ack) {
+        persist(event, ack);
     }
 
-    // Returns Avro-JSON as the response body (not a Jackson-bound object): Jackson
-    // cannot round-trip an Avro SpecificRecord, so the HTTP hop to the gateway speaks
-    // the same Avro-JSON contract the cold tier uses.
+    /**
+     * Consumes detection events from the topology's dedicated output topic.
+     *
+     * maritime.detections receives only events where at least one flag fired
+     * (loitering / darkVessel / speedAnomaly). Subscribing to a separate topic
+     * instead of maritime.enriched means the topology's output can never feed
+     * back into its own input — C1 processing loop structurally impossible.
+     *
+     * We upsert into the same DynamoDB hot tier so a GET /vessels/{mmsi}
+     * immediately reflects the latest detection state.
+     */
+    @KafkaListener(topics = "maritime.detections", groupId = "storage-service")
+    public void consumeDetectionEvent(EnrichedVesselEvent event, Acknowledgment ack) {
+        persist(event, ack);
+    }
+
+    /**
+     * Shared persistence logic for both listeners.
+     * Writes to S3 Parquet cold tier and DynamoDB hot tier, then acks.
+     * Any exception propagates to DefaultErrorHandler (retry → DLT).
+     */
+    private void persist(EnrichedVesselEvent event, Acknowledgment ack) {
+        VesselEvent vessel = event.getVesselEvent();
+
+        // ── Cold tier (S3, Parquet) ───────────────────────────────────────────
+        // Phase 7: switched from Avro-JSON to Parquet (columnar + Snappy compression).
+        // Key layout: vessel-events/date=<yyyy-MM-dd>/mmsi=<mmsi>/<epochMs>.parquet
+        // Spark reads these as a partitioned Dataset with partition pruning on date.
+        awsStorageService.saveParquetToS3(event);
+
+        // ── Hot tier (DynamoDB) ───────────────────────────────────────────────
+        // DynamoDB stores the latest state per vessel for real-time GET /vessels/{mmsi}.
+        // We still store Avro-JSON in the payload column for the gateway response;
+        // this keeps the HTTP contract unchanged while the cold tier moves to Parquet.
+        String json = AvroJson.toJson(event);
+        Map<String, AttributeValue> item = new HashMap<>();
+        item.put("mmsi",           new AttributeValue().withS(vessel.getMmsi()));
+        item.put("riskLevel",      new AttributeValue().withS(event.getRiskLevel()));
+        item.put("riskScore",      new AttributeValue().withN(String.valueOf(event.getRiskScore())));
+        item.put("inRestrictedZone", new AttributeValue().withBOOL(event.getInRestrictedZone()));
+        item.put("loitering",      new AttributeValue().withBOOL(event.getLoitering()));
+        item.put("darkVessel",     new AttributeValue().withBOOL(event.getDarkVessel()));
+        item.put("speedAnomaly",   new AttributeValue().withBOOL(event.getSpeedAnomaly()));
+        if (event.getZoneName() != null) {
+            item.put("zoneName",   new AttributeValue().withS(event.getZoneName()));
+        }
+        if (event.getZoneType() != null) {
+            item.put("zoneType",   new AttributeValue().withS(event.getZoneType()));
+        }
+        item.put("payload",        new AttributeValue().withS(json));
+        awsStorageService.saveToDynamoDB(item);
+
+        // Offset committed only after both writes succeed.
+        ack.acknowledge();
+        log.info("Persisted MMSI={} riskLevel={} loitering={} dark={} speedAnomaly={}",
+                vessel.getMmsi(), event.getRiskLevel(),
+                event.getLoitering(), event.getDarkVessel(), event.getSpeedAnomaly());
+    }
+
     @GetMapping(value = "/vessels/{mmsi}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> getVesselRisk(@PathVariable String mmsi) {
         Map<String, AttributeValue> item = awsStorageService.getVesselRisk(mmsi);
-        if (item == null) {
+        if (item == null || item.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
-
-        // Prefer the full stored payload (already Avro-JSON) if present.
         if (item.containsKey("payload")) {
             return ResponseEntity.ok(item.get("payload").getS());
         }
 
-        // Fallback: rebuild from flat columns. Avro requires all non-null fields, so the
-        // placeholder vessel gets zeroed position + an epoch timestamp (no payload row
-        // should normally hit this path).
+        // Fallback: rebuild from flat columns (should not normally be reached).
         VesselEvent placeholder = VesselEvent.newBuilder()
-                .setMmsi(mmsi)
-                .setLatitude(0.0)
-                .setLongitude(0.0)
-                .setSpeed(0.0)
-                .setHeading(0.0)
-                .setTimestamp(java.time.Instant.EPOCH)
-                .setEventType("UNKNOWN")
+                .setMmsi(mmsi).setLatitude(0.0).setLongitude(0.0)
+                .setSpeed(0.0).setHeading(0.0)
+                .setTimestamp(java.time.Instant.EPOCH).setEventType("UNKNOWN")
                 .build();
         EnrichedVesselEvent event = EnrichedVesselEvent.newBuilder()
                 .setVesselEvent(placeholder)
                 .setRiskLevel(attr(item, "riskLevel"))
-                .setRiskScore(item.containsKey("riskScore") ? Double.parseDouble(item.get("riskScore").getN()) : 0.0)
-                .setInRestrictedZone(item.containsKey("inRestrictedZone") && item.get("inRestrictedZone").getBOOL())
+                .setRiskScore(item.containsKey("riskScore")
+                        ? Double.parseDouble(item.get("riskScore").getN()) : 0.0)
+                .setInRestrictedZone(item.containsKey("inRestrictedZone")
+                        && item.get("inRestrictedZone").getBOOL())
                 .setZoneName(attr(item, "zoneName"))
+                .setZoneType(attr(item, "zoneType"))
                 .setDistanceToPort(0.0)
+                .setLoitering(item.containsKey("loitering")
+                        && item.get("loitering").getBOOL())
+                .setDarkVessel(item.containsKey("darkVessel")
+                        && item.get("darkVessel").getBOOL())
+                .setSpeedAnomaly(item.containsKey("speedAnomaly")
+                        && item.get("speedAnomaly").getBOOL())
                 .build();
         return ResponseEntity.ok(AvroJson.toJson(event));
     }

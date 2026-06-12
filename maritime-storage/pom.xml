@@ -42,6 +42,53 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!--
+            Phase 7: Parquet cold tier.
+            parquet-avro bridges Avro SpecificRecords to Parquet column format;
+            parquet-hadoop provides the ParquetWriter/ParquetFileWriter APIs.
+
+            Hadoop-client is excluded — we only need the LocalFileSystem and
+            the Parquet Hadoop output format, not YARN/HDFS. Spring Boot manages
+            the ByteBuddy / ASM versions that Hadoop pulls in; excluding the
+            full Hadoop client avoids version conflicts with Spring AOP.
+        -->
+        <dependency>
+            <groupId>org.apache.parquet</groupId>
+            <artifactId>parquet-avro</artifactId>
+            <version>1.13.1</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-yarn-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Minimal Hadoop runtime: only LocalFileSystem + Configuration.
+             We write Parquet to a local temp file, then push the bytes to S3
+             via the existing AWS SDK client. This avoids the S3A connector
+             and Hadoop-AWS entirely in the Spring Boot service. -->
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>3.3.6</version>
+            <exclusions>
+                <!-- Strip YARN, HDFS, Kerberos, logging bridges that conflict
+                     with Spring Boot's managed log4j/slf4j stack. -->
+                <exclusion><groupId>org.apache.hadoop</groupId><artifactId>hadoop-yarn-api</artifactId></exclusion>
+                <exclusion><groupId>org.apache.hadoop</groupId><artifactId>hadoop-hdfs-client</artifactId></exclusion>
+                <exclusion><groupId>com.sun.jersey</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>javax.servlet</groupId><artifactId>servlet-api</artifactId></exclusion>
+                <exclusion><groupId>org.mortbay.jetty</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.slf4j</groupId><artifactId>slf4j-log4j12</artifactId></exclusion>
+                <exclusion><groupId>log4j</groupId><artifactId>log4j</artifactId></exclusion>
+                <exclusion><groupId>org.apache.curator</groupId><artifactId>*</artifactId></exclusion>
+                <exclusion><groupId>org.apache.zookeeper</groupId><artifactId>zookeeper</artifactId></exclusion>
+            </exclusions>
+        </dependency>
         <!-- Actuator exposes /actuator/prometheus; the registry below renders the
              Micrometer meters in Prometheus text format for scraping. -->
         <dependency>

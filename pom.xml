@@ -18,6 +18,7 @@
         <module>maritime-streaming</module>
         <module>maritime-storage</module>
         <module>maritime-gateway</module>
+        <module>maritime-spark</module>
     </modules>
 
     <properties>
@@ -29,18 +30,19 @@
         <spring-cloud.version>2023.0.0</spring-cloud.version>
         <jts.version>1.19.0</jts.version>
         <aws-sdk.version>1.12.520</aws-sdk.version>
-        <!-- Override Spring Boot's managed Lombok; 1.18.40+ is required for JDK 24/25 -->
         <lombok.version>1.18.42</lombok.version>
-        <!-- Avro + Confluent Schema Registry. 7.5.x matches the cp-kafka:7.5.0 /
-             cp-schema-registry:7.5.0 images in docker-compose, so client, broker
-             and registry stay on one consistent Confluent Platform line. -->
         <avro.version>1.11.3</avro.version>
         <confluent.version>7.5.1</confluent.version>
         <caffeine.version>3.1.8</caffeine.version>
-        <!-- Structured JSON logging. Logback itself is transitive via Spring Boot;
-             this encoder turns each event into a single JSON line (incl. MDC), so
-             logs are queryable across services. 7.4 is the last 7.x on Logback 1.4. -->
         <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
+        <!-- Phase 5: test stack versions -->
+        <testcontainers.version>1.19.3</testcontainers.version>
+        <awaitility.version>4.2.0</awaitility.version>
+        <!-- Phase 5: maven-surefire (unit tests) + failsafe (integration tests) -->
+        <!-- surefire runs *Test classes in test phase; failsafe runs *IT classes  -->
+        <!-- in integration-test phase. CI calls `./mvnw verify` to run both.     -->
+        <surefire.version>3.2.2</surefire.version>
+        <failsafe.version>3.2.2</failsafe.version>
     </properties>
 
     <!-- Confluent hosts kafka-avro-serializer + the registry client here;
@@ -85,6 +87,20 @@
                 <artifactId>caffeine</artifactId>
                 <version>${caffeine.version}</version>
             </dependency>
+            <!-- Phase 5: Testcontainers BOM — covers kafka, localstack, postgresql modules -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.awaitility</groupId>
+                <artifactId>awaitility</artifactId>
+                <version>${awaitility.version}</version>
+                <scope>test</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -105,6 +121,32 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire.version}</version>
+                    <configuration>
+                        <!-- Unit tests: exclude *IT (integration) classes -->
+                        <excludes><exclude>**/*IT.java</exclude></excludes>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <version>${failsafe.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>integration-test</goal>
+                                <goal>verify</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                    <configuration>
+                        <!-- Integration tests: only *IT classes -->
+                        <includes><include>**/*IT.java</include></includes>
+                    </configuration>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.avro</groupId>
                     <artifactId>avro-maven-plugin</artifactId>

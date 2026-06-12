@@ -45,3 +45,21 @@ run-storage: ## Run storage service (:8083)
 
 run-gateway: ## Run gateway/API service (:8084)
 	$(MVNW) -pl maritime-gateway spring-boot:run
+
+## ---- Spark batch jobs ----
+spark-build: ## Build the shaded Spark fat JAR
+	$(MVNW) -pl maritime-spark package -DskipTests
+
+spark-daily: ## Run DailyVesselAggregatesJob locally (requires `local` profile)
+	$(MVNW) -pl maritime-spark exec:java -Plocal \
+		-Dexec.mainClass=com.maritime.spark.jobs.DailyVesselAggregatesJob
+
+spark-risk: ## Run RiskRollupJob locally
+	$(MVNW) -pl maritime-spark exec:java -Plocal \
+		-Dexec.mainClass=com.maritime.spark.jobs.RiskRollupJob
+
+spark-hotspot: ## Run LoiteringHotspotJob locally
+	$(MVNW) -pl maritime-spark exec:java -Plocal \
+		-Dexec.mainClass=com.maritime.spark.jobs.LoiteringHotspotJob
+
+spark-all: spark-build spark-daily spark-risk spark-hotspot ## Build + run all three Spark jobs

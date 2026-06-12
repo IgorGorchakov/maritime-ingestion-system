@@ -52,6 +52,22 @@
             <artifactId>logstash-logback-encoder</artifactId>
             <version>${logstash-logback-encoder.version}</version>
         </dependency>
+        <!-- Phase 5: Testcontainers + Awaitility for integration tests -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
