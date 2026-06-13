@@ -42,17 +42,22 @@ import java.util.Properties;
  *       consumes its own output and no processing loop is possible.
  *       The storage service subscribes to both topics independently.</li>
  *   <li><b>Punctuator:</b> dark-vessel detection can't rely on an incoming record —
- *       it fires when records *stop*. We schedule a wall-clock punctuator that scans
- *       the state store every minute and flags vessels silent for >= 10 minutes.</li>
+ *       it fires when records <em>stop</em>. We schedule a wall-clock punctuator that
+ *       scans the state store every minute and flags vessels silent for &ge; 10 minutes.</li>
+ *   <li><b>Serde lifecycle:</b> {@link #consumeSerde} and {@link #produceSerde} are
+ *       constructed once in the constructor and closed in {@link #stop()}.
+ *       See {@link AvroEnrichedEventSerdes} for the full explanation of why
+ *       inline {@code new} calls inside {@link #buildTopology()} leaked the
+ *       Schema Registry HTTP connection pool.</li>
  * </ul>
  *
  * <h3>Detectors</h3>
  * <ol>
  *   <li><b>Speed anomaly:</b> compare Haversine-implied speed (from previous position)
  *       against reported SOG. Flag if divergence > {@code SPEED_ANOMALY_THRESHOLD_KN}.</li>
- *   <li><b>Loitering:</b> vessel has been moving at < {@code LOITER_SPEED_KN} knots for
- *       >= {@code LOITER_DURATION_MINUTES} consecutive minutes.</li>
- *   <li><b>Dark vessel:</b> no AIS report received for >= {@code DARK_VESSEL_MINUTES}.</li>
+ *   <li><b>Loitering:</b> vessel has been moving at &lt; {@code LOITER_SPEED_KN} knots for
+ *       &ge; {@code LOITER_DURATION_MINUTES} consecutive minutes.</li>
+ *   <li><b>Dark vessel:</b> no AIS report received for &ge; {@code DARK_VESSEL_MINUTES}.</li>
  * </ol>
  */
 @Slf4j
@@ -72,32 +77,55 @@ public class MaritimeTopology {
     private static final double METERS_TO_NM = 1.0 / 1852.0;
 
     static final String STATE_STORE  = "vessel-state-store";
-    static final String INPUT_TOPIC   = "maritime.enriched";
+    static final String INPUT_TOPIC  = "maritime.enriched";
     /**
      * Detections are published to a dedicated output topic, NOT back to the
-     * input topic. Writing to maritime.enriched would create a processing loop:
+     * input topic. Writing to {@code maritime.enriched} would create a processing loop:
      * the topology would consume its own re-published records and the storage
      * service would double-persist every detected event. A separate topic
      * makes the data flow a strict DAG — structurally impossible to loop.
      *
-     * Consumers of maritime.detections (storage service) subscribe alongside
-     * maritime.enriched so they receive both clean enriched events and flagged
-     * detection events independently.
+     * <p>Consumers of {@code maritime.detections} (storage service) subscribe
+     * alongside {@code maritime.enriched} so they receive both clean enriched
+     * events and flagged detection events independently.
      */
-    static final String OUTPUT_TOPIC  = "maritime.detections";
+    static final String OUTPUT_TOPIC = "maritime.detections";
 
     private final MeterRegistry meterRegistry;
     private final String bootstrapServers;
     private final String schemaRegistryUrl;
+
+    /**
+     * Serde instances held as fields so their Schema Registry connection pools
+     * are created once and closed cleanly on shutdown.
+     *
+     * <p>The previous implementation called {@code new AvroEnrichedEventSerdes(...)}
+     * directly inside {@link #buildTopology()}, creating a fresh
+     * {@link io.confluent.kafka.schemaregistry.client.SchemaRegistryClient} (and its
+     * underlying HTTP connection pool) on every topology build. Kafka Streams retains
+     * those instances internally but never calls {@code close()} on them, so the
+     * pools were never released — a leak that grew on every topology restart.
+     *
+     * <p>Fix: construct once here, pass the same instances to
+     * {@code Consumed.with} / {@code Produced.with}, and call {@link #stop()}
+     * to drain the pools before the JVM exits.
+     */
+    private final AvroEnrichedEventSerdes consumeSerde;
+    private final AvroEnrichedEventSerdes produceSerde;
+
     private KafkaStreams streams;
 
     public MaritimeTopology(
             MeterRegistry meterRegistry,
             @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers,
             @Value("${schema.registry.url:http://localhost:8085}") String schemaRegistryUrl) {
-        this.meterRegistry    = meterRegistry;
-        this.bootstrapServers = bootstrapServers;
+        this.meterRegistry     = meterRegistry;
+        this.bootstrapServers  = bootstrapServers;
         this.schemaRegistryUrl = schemaRegistryUrl;
+        // Construct the Serdes here so the SchemaRegistryClient HTTP pools are
+        // tied to this component's lifecycle, not to the topology build cycle.
+        this.consumeSerde = new AvroEnrichedEventSerdes(schemaRegistryUrl);
+        this.produceSerde = new AvroEnrichedEventSerdes(schemaRegistryUrl);
     }
 
     @PostConstruct
@@ -131,6 +159,12 @@ public class MaritimeTopology {
             streams.close(Duration.ofSeconds(10));
             log.info("MaritimeTopology stopped");
         }
+        // Close the Serde instances after Streams has fully stopped so no in-flight
+        // serialization is interrupted. This releases the SchemaRegistryClient
+        // connection pools that were opened in the constructor.
+        consumeSerde.close();
+        produceSerde.close();
+        log.info("MaritimeTopology serdes closed");
     }
 
     // ── Topology definition ──────────────────────────────────────────────────
@@ -148,24 +182,19 @@ public class MaritimeTopology {
                 );
         builder.addStateStore(storeBuilder);
 
-        // Read enriched events. The value Serde must match KafkaAvroDeserializer
-        // because RiskScorerService wrote Avro EnrichedVesselEvent records.
-        // We consume as byte[] and let the Processor handle Avro via the registry.
-        // However, since spring-kafka already configured the Avro deserializer for
-        // the main consumer group, we use a separate Streams consumer group here.
-        //
+        // Read enriched events using the shared consumeSerde (field, not new instance).
         // Streams reads from the SAME topic as the storage service, but with a
         // DIFFERENT group id ("maritime-detection-topology") so both receive all
         // records independently.
         builder.stream(INPUT_TOPIC,
-                        Consumed.with(Serdes.String(), new AvroEnrichedEventSerdes(schemaRegistryUrl)))
+                        Consumed.with(Serdes.String(), consumeSerde))
                 .process(detectionProcessorSupplier(), STATE_STORE)
                 // Filter: only forward records where at least one detection fired.
                 // Records with no flags set produce null from the processor and
                 // are dropped here — no output to maritime.detections for clean events.
                 .filter((key, value) -> value != null)
                 .to(OUTPUT_TOPIC,
-                        Produced.with(Serdes.String(), new AvroEnrichedEventSerdes(schemaRegistryUrl)));
+                        Produced.with(Serdes.String(), produceSerde));
 
         return builder.build();
     }
@@ -214,8 +243,7 @@ public class MaritimeTopology {
                 current.setSpeedAnomaly(speedAnomaly);
                 store.put(mmsi, current);
 
-                // Only re-publish if at least one detection flag fired, to avoid
-                // creating an infinite re-publish loop for clean events.
+                // Only forward if at least one detection fired.
                 if (loitering || speedAnomaly) {
                     if (loitering)    meterRegistry.counter("detections", "type", "loitering").increment();
                     if (speedAnomaly) meterRegistry.counter("detections", "type", "speed_anomaly").increment();
@@ -252,7 +280,7 @@ public class MaritimeTopology {
             private boolean detectSpeedAnomaly(VesselState prev, EnrichedVesselEvent event) {
                 if (prev == null) return false;
 
-                long nowMs   = event.getVesselEvent().getTimestamp().toEpochMilli();
+                long nowMs     = event.getVesselEvent().getTimestamp().toEpochMilli();
                 long elapsedMs = nowMs - prev.getLastSeenMs();
                 if (elapsedMs <= 0) return false;
 
@@ -261,9 +289,9 @@ public class MaritimeTopology {
                         event.getVesselEvent().getLatitude(),
                         event.getVesselEvent().getLongitude()
                 );
-                double distNm      = distMeters * METERS_TO_NM;
-                double elapsedHrs  = elapsedMs / 3_600_000.0;
-                double impliedKnots = distNm / elapsedHrs;
+                double distNm        = distMeters * METERS_TO_NM;
+                double elapsedHrs    = elapsedMs / 3_600_000.0;
+                double impliedKnots  = distNm / elapsedHrs;
                 double reportedKnots = event.getVesselEvent().getSpeed();
 
                 double divergence = Math.abs(impliedKnots - reportedKnots);

@@ -87,32 +87,7 @@ Order: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**. Each phase is inde
 - **Create:** `DailyVesselAggregatesJob`, `RiskRollupJob`, `SparkSessionFactory`; storage writes Parquet; gateway `GET /intelligence/{mmsi}/history`.
 - **Verify:** `spark-submit` populates `vessel_daily_stats`; gateway history endpoint returns rollups.
 
-### Phase 8 — Agentic AI artifacts + docs
-- **Proves:** agentic AI nice-to-have (and this is built *with* Claude Code — free points).
-- **Why (teach):** `CLAUDE.md` is a machine-readable architecture contract; an MCP server exposing the platform as tools turns "a demo" into "an agent-operable system."
-- **Create:** `CLAUDE.md` (architecture, `make` targets, Avro-first / manual-ack conventions, ports table); README rewrite with Lambda framing + Grafana screenshots; `.mcp/` server exposing tools (`get_vessel_risk`, `query_loitering_events`, `list_dark_vessels`, `replay_dlq`) + a documented "maritime-analyst" subagent workflow.
-- **Verify:** `claude mcp` lists the server; `get_vessel_risk` returns live data from the running stack.
-
 ---
-
-## Key risks & sequencing constraints
-
-1. **Phase 1 (Avro) is the keystone** — it changes the wire type every later phase touches; do it before robustness/quality. Phase 6 re-extends the schema to exercise compatibility.
-2. **Port collision:** Schema Registry default 8081 ↔ ingestion 8081 → put registry on **8085**.
-3. **Hard chain:** manual-ack/DLQ (2) → quality gate (3) → stateful detection (6).
-4. **S3 JSON-vs-Parquet** decision is opened in Phase 1 and finalized in Phase 7 — flag in both places so storage isn't rewritten twice.
-5. **Spark dependency isolation** is mandatory (standalone module).
-6. **Simulator realism** (Phase 6) gates whether the 6/7 demos look alive.
-
----
-
-## Critical files
-
-- `maritime-common/src/main/java/com/maritime/common/dto/VesselEvent.java` → becomes Avro `.avsc` (Phase 1).
-- `maritime-streaming/src/main/java/com/maritime/streaming/service/RiskScorerService.java` → validation, DLQ, manual ack, Kafka Streams detectors, `PortDistanceProvider` refactor.
-- `maritime-storage/src/main/java/com/maritime/storage/service/AwsStorageService.java` → Parquet cold tier, structured logging, Spark input.
-- `docker-compose.yml` → add schema-registry, prometheus, grafana; activate PostGIS.
-- `pom.xml` (parent) → Confluent repo, avro plugin, surefire/failsafe split, new module declarations.
 
 ## Verification (overall)
 

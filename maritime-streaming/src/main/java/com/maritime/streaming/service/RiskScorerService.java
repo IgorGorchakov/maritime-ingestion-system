@@ -20,21 +20,49 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Random;
 
 /**
  * Validates, deduplicates, and enriches raw AIS events before publishing to
  * {@code maritime.enriched}.
  *
+ * <h3>ETL stages</h3>
+ * <ol>
+ *   <li><b>Extract</b> — event arrives from {@code maritime.ais.raw} via
+ *       {@code @KafkaListener}.</li>
+ *   <li><b>Validate</b> — {@link VesselEventValidator} checks MMSI format,
+ *       lat/lon bounds, null-island, timestamp freshness, and speed ceiling.
+ *       Invalid events are routed to {@code maritime.ais.quarantine}.</li>
+ *   <li><b>Dedup</b> — {@link DedupService} (Caffeine cache) drops replayed
+ *       {@code (mmsi, timestamp)} pairs within the configured TTL window.
+ *       Duplicates are also quarantined so they can be audited.</li>
+ *   <li><b>Transform</b> — PostGIS {@link ZoneRepository} identifies which
+ *       geofence zones contain the position; the highest-priority zone drives
+ *       the risk score. {@link PortDistanceProvider} supplies the distance to
+ *       the nearest port in nautical miles.</li>
+ *   <li><b>Load</b> — the enriched event is published to
+ *       {@code maritime.enriched}. The Kafka offset is only committed (ack)
+ *       after the produce callback confirms durability.</li>
+ * </ol>
+ *
+ * <h3>Detection flags</h3>
+ * {@code loitering}, {@code darkVessel}, and {@code speedAnomaly} are
+ * initialised to {@code false} here. They are set by
+ * {@link com.maritime.streaming.streams.MaritimeTopology}, which consumes
+ * from {@code maritime.enriched} with its own consumer group and re-publishes
+ * flagged events to the <em>separate</em> {@code maritime.detections} topic.
+ * The two topics are independent — there is no feedback loop back into this
+ * service.
+ *
  * <h3>Phase 6 changes</h3>
  * <ul>
  *   <li>Replaced the hardcoded rectangle with a PostGIS {@link ZoneRepository}
- *       lookup ({@code ST_Contains}). The "most significant" zone is selected by
- *       priority: RESTRICTED > PORT > EEZ.</li>
- *   <li>The new {@code zoneType} field on {@link EnrichedVesselEvent} is populated.</li>
- *   <li>Detection flags (loitering/darkVessel/speedAnomaly) default to {@code false}
- *       here — {@link com.maritime.streaming.streams.MaritimeTopology} sets them
- *       on the downstream re-enrichment pass.</li>
+ *       lookup ({@code ST_Contains}). The "most significant" zone is selected
+ *       by priority: RESTRICTED &gt; PORT &gt; EEZ.</li>
+ *   <li>The new {@code zoneType} field on {@link EnrichedVesselEvent} is
+ *       populated.</li>
+ *   <li>Distance-to-port extracted behind {@link PortDistanceProvider} so the
+ *       placeholder can be swapped for a real PostGIS lookup in Phase 7 without
+ *       touching this class.</li>
  * </ul>
  */
 @Slf4j
@@ -48,15 +76,15 @@ public class RiskScorerService {
     // Zone type priority for risk scoring (higher index = higher risk weight).
     private static final List<String> ZONE_PRIORITY = List.of("EEZ", "PORT", "RESTRICTED");
 
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaTemplate<String, Object>    kafkaTemplate;
     private final KafkaTemplate<String, VesselEvent> quarantineKafkaTemplate;
-    private final VesselEventValidator validator;
-    private final DedupService dedupService;
-    private final ZoneRepository zoneRepository;
-    private final MeterRegistry meterRegistry;
-    private final Counter eventsEnriched;
-    private final Timer processingLatency;
-    private final Random random = new Random();
+    private final VesselEventValidator             validator;
+    private final DedupService                     dedupService;
+    private final ZoneRepository                   zoneRepository;
+    private final PortDistanceProvider             portDistanceProvider;
+    private final MeterRegistry                    meterRegistry;
+    private final Counter                          eventsEnriched;
+    private final Timer                            processingLatency;
 
     @Autowired
     public RiskScorerService(KafkaTemplate<String, Object> kafkaTemplate,
@@ -64,12 +92,14 @@ public class RiskScorerService {
                              VesselEventValidator validator,
                              DedupService dedupService,
                              ZoneRepository zoneRepository,
+                             PortDistanceProvider portDistanceProvider,
                              MeterRegistry meterRegistry) {
         this.kafkaTemplate           = kafkaTemplate;
         this.quarantineKafkaTemplate = quarantineKafkaTemplate;
         this.validator               = validator;
         this.dedupService            = dedupService;
         this.zoneRepository          = zoneRepository;
+        this.portDistanceProvider    = portDistanceProvider;
         this.meterRegistry           = meterRegistry;
         this.eventsEnriched = Counter.builder("events.enriched")
                 .description("Events successfully enriched and published to the enriched topic")
@@ -115,15 +145,18 @@ public class RiskScorerService {
 
         boolean inRestrictedZone = zones.stream()
                 .anyMatch(z -> "RESTRICTED".equals(z.getZone_type()));
-        String zoneName = primaryZone != null ? primaryZone.getName()       : null;
-        String zoneType = primaryZone != null ? primaryZone.getZone_type()  : null;
+        String zoneName = primaryZone != null ? primaryZone.getName()      : null;
+        String zoneType = primaryZone != null ? primaryZone.getZone_type() : null;
 
-        // Distance to port: random placeholder — Phase 7 replaces with real lookup.
-        double distanceToPort = random.nextDouble() * 100;
+        // Delegate distance-to-port to the injected strategy. The current
+        // implementation is RandomPortDistanceProvider (placeholder). Phase 7
+        // replaces it with PostGisPortDistanceProvider via PipelineConfig —
+        // no changes required here.
+        double distanceToPort = portDistanceProvider.distanceToNearestPortNm(lat, lon);
 
         // Risk scoring: zone type drives the base score.
         double riskScore = 0.0;
-        if (inRestrictedZone)          riskScore += 50;
+        if (inRestrictedZone)             riskScore += 50;
         else if ("PORT".equals(zoneType)) riskScore += 20;
         else if ("EEZ".equals(zoneType))  riskScore += 10;
 
@@ -134,9 +167,11 @@ public class RiskScorerService {
         meterRegistry.counter("risk.level", "level", riskLevel).increment();
 
         // ── Load (L): publish enriched event ─────────────────────────────────
-        // Detection flags (loitering/darkVessel/speedAnomaly) start as false here.
-        // MaritimeTopology consumes from maritime.enriched and sets them on a
-        // second pass, re-publishing the flagged event to the same topic.
+        // Detection flags default to false. MaritimeTopology consumes from
+        // maritime.enriched under its own consumer group ("maritime-detection-topology")
+        // and publishes any flagged events to the SEPARATE maritime.detections topic.
+        // That topic is consumed by the storage service independently — there is no
+        // path by which a detection re-enters this service or maritime.enriched.
         EnrichedVesselEvent enrichedEvent = EnrichedVesselEvent.newBuilder()
                 .setVesselEvent(event)
                 .setInRestrictedZone(inRestrictedZone)
@@ -165,8 +200,9 @@ public class RiskScorerService {
 
     /**
      * Route a bad/duplicate event to the quarantine topic.
-     * Ack deferred into the produce callback — offset is only committed after
-     * the quarantine record is durably handed off to Kafka.
+     * The Kafka offset is only committed after the produce callback confirms the
+     * quarantine record is durably handed off — same ack-after-side-effect pattern
+     * as the enriched path.
      */
     private void quarantine(VesselEvent event, String reason, Acknowledgment ack) {
         meterRegistry.counter("events.quarantined", "reason", reason).increment();

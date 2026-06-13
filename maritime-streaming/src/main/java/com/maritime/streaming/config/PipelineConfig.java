@@ -2,6 +2,8 @@ package com.maritime.streaming.config;
 
 import com.maritime.common.validation.VesselEventValidator;
 import com.maritime.streaming.service.DedupService;
+import com.maritime.streaming.service.PortDistanceProvider;
+import com.maritime.streaming.service.RandomPortDistanceProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,18 +11,28 @@ import org.springframework.context.annotation.Configuration;
 import java.time.Duration;
 
 /**
- * Wires the Phase 3 validate/dedup pipeline collaborators as Spring beans.
+ * Wires the pipeline collaborators — validator, dedup, and port-distance
+ * provider — as Spring beans.
  *
- * Both {@link VesselEventValidator} (framework-free, lives in maritime-common) and
- * {@link DedupService} are plain classes by design, so they are registered here
- * via @Bean rather than component-scanned.
+ * <p>All three are plain classes by design (no Spring annotations on the
+ * implementation types), so they are registered here via {@code @Bean} rather
+ * than component-scanned. This keeps the implementations framework-free and
+ * directly unit-testable.
+ *
+ * <h3>Swapping the port-distance provider</h3>
+ * The current {@link RandomPortDistanceProvider} is a placeholder.
+ * Phase 7 introduces {@code PostGisPortDistanceProvider}. To activate it,
+ * replace the {@link #portDistanceProvider()} bean body — no other file needs
+ * to change because {@link com.maritime.streaming.service.RiskScorerService}
+ * depends on the {@link PortDistanceProvider} interface, not the implementation.
  */
 @Configuration
 public class PipelineConfig {
 
     /**
-     * Dedup window: a (mmsi, timestamp) key is treated as a duplicate if seen again
-     * within this TTL. Defaults to 1 hour; override with dedup.ttl-minutes.
+     * Dedup window: a (mmsi, timestamp) key is treated as a duplicate if seen
+     * again within this TTL. Defaults to 1 hour; override with
+     * {@code dedup.ttl-minutes} in application properties.
      */
     @Value("${dedup.ttl-minutes:60}")
     private long dedupTtlMinutes;
@@ -33,5 +45,17 @@ public class PipelineConfig {
     @Bean
     public DedupService dedupService() {
         return new DedupService(Duration.ofMinutes(dedupTtlMinutes));
+    }
+
+    /**
+     * Port-distance strategy used by {@link com.maritime.streaming.service.RiskScorerService}.
+     *
+     * <p>Currently wired to {@link RandomPortDistanceProvider} (placeholder).
+     * Phase 7 replaces this with {@code new PostGisPortDistanceProvider(jdbcTemplate)}
+     * once the port gazetteer table is loaded from GeoJSON.
+     */
+    @Bean
+    public PortDistanceProvider portDistanceProvider() {
+        return new RandomPortDistanceProvider();
     }
 }
