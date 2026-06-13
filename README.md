@@ -1,12 +1,12 @@
 # Maritime Intelligence Platform - Learning Project
 
-This project simulates a simplified version of the Maritime Intelligence Platform described in the job description. It demonstrates the core architecture using Java, Spring Boot, Kafka, and AWS (via LocalStack).
+This project simulates a simplified version of the Maritime Intelligence Platform described in the job description. It demonstrates the core architecture using Java, Spring Boot, Kafka, and Postgres — and runs entirely on localhost with no cloud dependency.
 
 ## Architecture Overview
 
 1.  **Ingestion Service**: Simulates AIS vessel data feeds and pushes them to a Kafka topic (`maritime.ais.raw`).
 2.  **Streaming Service**: Consumes raw vessel events from Kafka, enriches them with geospatial data (checking against restricted zones), calculates a risk score, and pushes the enriched data to another Kafka topic (`maritime.enriched`).
-3.  **Storage Service**: Consumes enriched events from Kafka, saves "hot" data to DynamoDB (simulated via LocalStack) and "cold" data to S3 (simulated via LocalStack). Provides a REST API to query vessel risk data.
+3.  **Storage Service**: Consumes enriched events from Kafka, saves "hot" data (latest state per vessel) to Postgres and "cold" data to a partitioned Parquet archive on the local filesystem. Provides a REST API to query vessel risk data. The storage tiers sit behind `VesselStateStore` / `ColdTierWriter` interfaces, so the backing store is swappable.
 4.  **Gateway Service**: Aggregates data from the Storage Service and provides a unified API endpoint for frontend consumption.
 
 ## Prerequisites
@@ -21,7 +21,7 @@ This project simulates a simplified version of the Maritime Intelligence Platfor
 ```bash
 docker-compose up -d
 ```
-This starts Kafka, Zookeeper, LocalStack (AWS S3/DynamoDB), and PostgreSQL.
+This starts Kafka, Zookeeper, Schema Registry, and PostgreSQL.
 
 ### 2. Build the Project
 ```bash
@@ -69,5 +69,5 @@ curl -X POST http://localhost:8081/api/v1/simulate/stop
 -   **Maven Multi-Module Project**: Shared code in `maritime-common`.
 -   **Kafka Streaming**: Producer/Consumer pattern with topic partitioning.
 -   **Geospatial Processing**: Point-in-polygon checks using JTS.
--   **AWS Integration**: S3 and DynamoDB interaction via LocalStack.
+-   **Tiered Storage**: Postgres hot tier (latest state per vessel) + local Parquet cold tier, decoupled behind storage-port interfaces.
 -   **Microservices Communication**: REST API aggregation via Gateway.

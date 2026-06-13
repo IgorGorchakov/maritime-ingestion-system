@@ -40,6 +40,9 @@ spark-warehouse/
 derby.log
 metastore_db/
 
+# ---- Local cold tier (Parquet written by maritime-storage) ----
+data/
+
 # ---- Local env / secrets ----
 .env
 *.local

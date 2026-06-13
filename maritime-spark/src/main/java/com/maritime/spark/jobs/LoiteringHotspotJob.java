@@ -57,8 +57,7 @@ public class LoiteringHotspotJob {
         log.info("LoiteringHotspotJob starting — date={}", cfg.batchDate);
 
         SparkSession spark = SparkSessionFactory.createLocal(
-                "LoiteringHotspot-" + cfg.batchDate,
-                cfg.s3Endpoint, cfg.awsAccessKey, cfg.awsSecretKey);
+                "LoiteringHotspot-" + cfg.batchDate);
 
         run(spark, cfg);
         spark.stop();

@@ -1,0 +1,11 @@
+# Tell Grafana to load dashboard JSON from disk on startup.
+apiVersion: 1
+
+providers:
+  - name: maritime
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

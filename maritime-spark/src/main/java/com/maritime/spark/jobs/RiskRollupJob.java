@@ -55,8 +55,7 @@ public class RiskRollupJob {
         log.info("RiskRollupJob starting — date={}", cfg.batchDate);
 
         SparkSession spark = SparkSessionFactory.createLocal(
-                "RiskRollup-" + cfg.batchDate,
-                cfg.s3Endpoint, cfg.awsAccessKey, cfg.awsSecretKey);
+                "RiskRollup-" + cfg.batchDate);
 
         run(spark, cfg);
         spark.stop();

@@ -39,14 +39,6 @@ services:
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
 
-  localstack:
-    image: localstack/localstack:2.3.0
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=s3,dynamodb
-      - DEFAULT_REGION=us-east-1
-
   postgres:
     image: postgis/postgis:15-3.3
     environment:

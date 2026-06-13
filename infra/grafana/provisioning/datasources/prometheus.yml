@@ -1,0 +1,12 @@
+# Auto-provision the Prometheus datasource so the dashboard works on first boot.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    # In-network address: Grafana and Prometheus share the compose network.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true

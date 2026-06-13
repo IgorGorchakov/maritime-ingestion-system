@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shared logging config for every service that depends on maritime-common.
+  Spring Boot auto-detects `logback-spring.xml` on the classpath, so each service
+  inherits this with zero per-service wiring.
+
+  Two profiles, switched by the active Spring profile:
+    * default (prod-like) — one JSON object per line via LogstashEncoder, so logs
+      are shippable to Loki/ELK and queryable by field. Every line includes the
+      `correlationId` MDC value, which is how one vessel is followed across the
+      four services and two Kafka hops.
+    * `local` — a human-readable console pattern (with the correlation id inline)
+      for day-to-day development, where JSON would just be noise.
+-->
+<configuration>
+
+    <springProfile name="local">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-no-corr-id}] %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!local">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <!-- MDC (incl. correlationId) is included by default; named here for clarity. -->
+                <includeMdcKeyName>correlationId</includeMdcKeyName>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON"/>
+        </root>
+    </springProfile>
+
+</configuration>

@@ -19,7 +19,7 @@ import java.util.Map;
  * <h3>Endpoints</h3>
  * <ul>
  *   <li>{@code GET /api/v1/intelligence/{mmsi}} — latest real-time enriched event
- *       (from DynamoDB hot tier via the storage service).</li>
+ *       (from the Postgres hot tier via the storage service).</li>
  *   <li>{@code GET /api/v1/intelligence/{mmsi}/history} — Spark batch rollup:
  *       daily aggregates, risk percentiles, and detection flag counts computed
  *       over the Parquet cold tier (Phase 7, Lambda batch layer).</li>
@@ -28,7 +28,7 @@ import java.util.Map;
  * <h3>Lambda architecture serving layer</h3>
  * The gateway is the <em>serving layer</em> of the Lambda architecture:
  * <ul>
- *   <li><b>Speed layer</b> (MaritimeTopology) → DynamoDB → {@code /{mmsi}}</li>
+ *   <li><b>Speed layer</b> (MaritimeTopology) → Postgres hot tier → {@code /{mmsi}}</li>
  *   <li><b>Batch layer</b> (Spark jobs) → PostGIS → {@code /{mmsi}/history}</li>
  * </ul>
  * Both views use the same MMSI key; the client can merge them to get the full

@@ -32,9 +32,9 @@
     <artifactId>maritime-spark</artifactId>
     <name>Maritime Spark Batch Layer</name>
     <description>
-        Standalone Spark jobs for batch analytics over the S3/Parquet cold tier.
-        Intentionally isolated from Spring Boot to prevent Spark/Spring classpath
-        conflicts. Submit with spark-submit; do not run via spring-boot:run.
+        Standalone Spark jobs for batch analytics over the local-filesystem Parquet
+        cold tier. Intentionally isolated from Spring Boot to prevent Spark/Spring
+        classpath conflicts. Submit with spark-submit; do not run via spring-boot:run.
     </description>
 
     <!--
@@ -48,10 +48,8 @@
              in the existing docker-compose and avoids a second Scala version
              on the classpath. -->
         <spark.version>3.5.0</spark.version>
-        <!-- Hadoop 3.3.6 AWS module provides the S3A connector used for LocalStack. -->
-        <hadoop.version>3.3.6</hadoop.version>
         <!-- parquet-avro bridges between the Avro SpecificRecord types generated
-             by maritime-common and the Parquet columnar format written to S3. -->
+             by maritime-common and the Parquet columnar format on the local cold tier. -->
         <parquet.version>1.13.1</parquet.version>
         <!-- Avro must match maritime-common's version exactly so the generated
              SpecificRecord classes are binary-compatible across the classpath. -->
@@ -143,8 +141,8 @@
             <artifactId>parquet-avro</artifactId>
             <version>${parquet.version}</version>
             <exclusions>
-                <!-- Parquet bundles hadoop-client transitively; we supply our own
-                     hadoop-aws below with a specific version. -->
+                <!-- Parquet bundles hadoop-client transitively; spark-submit already
+                     provides Hadoop (incl. LocalFileSystem) on its classpath. -->
                 <exclusion>
                     <groupId>org.apache.hadoop</groupId>
                     <artifactId>hadoop-client</artifactId>
@@ -153,37 +151,10 @@
         </dependency>
 
         <!--
-            ── S3A connector (provided: Hadoop ships with spark-submit) ─────────
-            hadoop-aws provides the S3AFileSystem that maps s3a:// URIs to the
-            AWS SDK. `provided` because spark-submit includes Hadoop on its
-            classpath; bundling it would create a duplicate/conflicting copy.
-        -->
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-aws</artifactId>
-            <version>${hadoop.version}</version>
-            <scope>provided</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.amazonaws</groupId>
-                    <artifactId>aws-java-sdk-bundle</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <!-- AWS SDK bundle (provided alongside hadoop-aws at submit time). -->
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-bundle</artifactId>
-            <version>1.12.520</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!--
             ── PostgreSQL JDBC — bundled in fat JAR ─────────────────────────────
             Spark jobs write rollups to PostGIS via JDBC. The driver must be in
-            the fat JAR (or passed via --jars) because it is NOT part of Spark's
-            default classpath.
+            the fat JAR (or supplied at submit time) because it is NOT part of
+            Spark's default classpath.
         -->
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -231,24 +202,6 @@
                             <artifactId>log4j</artifactId>
                         </exclusion>
                     </exclusions>
-                </dependency>
-                <dependency>
-                    <groupId>org.apache.hadoop</groupId>
-                    <artifactId>hadoop-aws</artifactId>
-                    <version>${hadoop.version}</version>
-                    <scope>runtime</scope>
-                    <exclusions>
-                        <exclusion>
-                            <groupId>com.amazonaws</groupId>
-                            <artifactId>aws-java-sdk-bundle</artifactId>
-                        </exclusion>
-                    </exclusions>
-                </dependency>
-                <dependency>
-                    <groupId>com.amazonaws</groupId>
-                    <artifactId>aws-java-sdk-bundle</artifactId>
-                    <version>1.12.520</version>
-                    <scope>runtime</scope>
                 </dependency>
             </dependencies>
         </profile>
@@ -313,7 +266,7 @@
                                     "org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation=
                                     "org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <!-- Default main; overridden at spark-submit time via --class. -->
+                                    <!-- Default main; overridden at spark-submit time via the class flag. -->
                                     <mainClass>com.maritime.spark.jobs.DailyVesselAggregatesJob</mainClass>
                                 </transformer>
                             </transformers>

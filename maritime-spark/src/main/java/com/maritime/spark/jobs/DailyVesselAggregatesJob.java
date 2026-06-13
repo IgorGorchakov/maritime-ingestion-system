@@ -41,10 +41,10 @@ import static org.apache.spark.sql.functions.*;
  * The gateway serving layer merges both views.
  *
  * <h3>Parquet partitioning</h3>
- * The storage service writes {@code s3a://<bucket>/vessel-events/date=<date>/mmsi=<mmsi>/events.parquet}.
+ * The storage service writes {@code file://<coldTierDir>/vessel-events/date=<date>/mmsi=<mmsi>/<epochMs>.parquet}.
  * Spark's partition discovery reads the {@code date} and {@code mmsi} path
  * segments as virtual columns, so we can push a {@code WHERE date = ?} predicate
- * down to S3 and avoid reading unneeded partitions (partition pruning).
+ * down to the filesystem and avoid reading unneeded partitions (partition pruning).
  *
  * <h3>Running locally</h3>
  * <pre>{@code
@@ -74,8 +74,7 @@ public class DailyVesselAggregatesJob {
                 cfg.batchDate, cfg.parquetInputPath());
 
         SparkSession spark = SparkSessionFactory.createLocal(
-                "DailyVesselAggregates-" + cfg.batchDate,
-                cfg.s3Endpoint, cfg.awsAccessKey, cfg.awsSecretKey);
+                "DailyVesselAggregates-" + cfg.batchDate);
 
         run(spark, cfg);
         spark.stop();

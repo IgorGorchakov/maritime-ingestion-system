@@ -12,7 +12,7 @@
 
     <artifactId>maritime-storage</artifactId>
     <name>Maritime Storage Service</name>
-    <description>Integrates with AWS (LocalStack) for storage and provides a REST API</description>
+    <description>Persists enriched events to a Parquet cold tier (local filesystem) and a Postgres hot tier, and provides a REST API</description>
 
     <dependencies>
         <dependency>
@@ -28,19 +28,15 @@
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
+        <!-- Hot tier: Postgres via JdbcTemplate (replaces DynamoDB). -->
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-s3</artifactId>
-            <version>${aws-sdk.version}</version>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-dynamodb</artifactId>
-            <version>${aws-sdk.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
         </dependency>
         <!--
             Phase 7: Parquet cold tier.
@@ -68,8 +64,8 @@
             </exclusions>
         </dependency>
         <!-- Minimal Hadoop runtime: only LocalFileSystem + Configuration.
-             We write Parquet to a local temp file, then push the bytes to S3
-             via the existing AWS SDK client. This avoids the S3A connector
+             AvroParquetWriter writes Parquet directly to the local cold-tier
+             directory via Hadoop's LocalFileSystem. This avoids the S3A connector
              and Hadoop-AWS entirely in the Spring Boot service. -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>
