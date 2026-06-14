@@ -66,7 +66,7 @@ public class LoiteringHotspotJob {
         log.info("LoiteringHotspotJob complete");
     }
 
-    static void run(SparkSession spark, JobConfig cfg) {
+    public static void run(SparkSession spark, JobConfig cfg) {
         Dataset<Row> raw = spark.read()
                 .format("parquet")
                 .option("mergeSchema", "false")

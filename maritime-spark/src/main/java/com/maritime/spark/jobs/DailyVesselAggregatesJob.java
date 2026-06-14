@@ -85,7 +85,7 @@ public class DailyVesselAggregatesJob {
      * Core logic extracted for testability — accepts an already-built SparkSession
      * so unit tests can pass an in-memory {@code SparkSession.master("local[1]")}.
      */
-    static void run(SparkSession spark, JobConfig cfg) {
+    public static void run(SparkSession spark, JobConfig cfg) {
         // ── Read ──────────────────────────────────────────────────────────────
         // Spark auto-discovers the date= and mmsi= partition columns from the path.
         // We filter on date immediately so only one partition is loaded — this is

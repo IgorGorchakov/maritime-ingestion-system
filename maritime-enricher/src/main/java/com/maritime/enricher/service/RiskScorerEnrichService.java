@@ -68,7 +68,7 @@ import java.util.List;
  */
 @Slf4j
 @Service
-public class RiskScorerService {
+public class RiskScorerEnrichService {
 
     private static final String REASON_HEADER = "reason";
 
@@ -86,13 +86,13 @@ public class RiskScorerService {
     private final Timer processingLatency;
 
     @Autowired
-    public RiskScorerService(KafkaTemplate<String, Object> kafkaTemplate,
-                             KafkaTemplate<String, VesselEvent> quarantineKafkaTemplate,
-                             VesselEventValidator validator,
-                             DedupService dedupService,
-                             ZoneRepository zoneRepository,
-                             PortDistanceProvider portDistanceProvider,
-                             MeterRegistry meterRegistry) {
+    public RiskScorerEnrichService(KafkaTemplate<String, Object> kafkaTemplate,
+                                   KafkaTemplate<String, VesselEvent> quarantineKafkaTemplate,
+                                   VesselEventValidator validator,
+                                   DedupService dedupService,
+                                   ZoneRepository zoneRepository,
+                                   PortDistanceProvider portDistanceProvider,
+                                   MeterRegistry meterRegistry) {
         this.kafkaTemplate = kafkaTemplate;
         this.quarantineKafkaTemplate = quarantineKafkaTemplate;
         this.validator = validator;

@@ -4,6 +4,7 @@ import com.maritime.common.validation.VesselEventValidator;
 import com.maritime.enricher.service.DedupService;
 import com.maritime.enricher.service.PortDistanceProvider;
 import com.maritime.enricher.service.RandomPortDistanceProvider;
+import com.maritime.enricher.service.RiskScorerEnrichService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,7 +24,7 @@ import java.time.Duration;
  * The current {@link RandomPortDistanceProvider} is a placeholder.
  * Phase 7 introduces {@code PostGisPortDistanceProvider}. To activate it,
  * replace the {@link #portDistanceProvider()} bean body — no other file needs
- * to change because {@link com.maritime.enricher.service.RiskScorerService}
+ * to change because {@link RiskScorerEnrichService}
  * depends on the {@link PortDistanceProvider} interface, not the implementation.
  */
 @Configuration
@@ -48,7 +49,7 @@ public class PipelineConfig {
     }
 
     /**
-     * Port-distance strategy used by {@link com.maritime.enricher.service.RiskScorerService}.
+     * Port-distance strategy used by {@link RiskScorerEnrichService}.
      *
      * <p>Currently wired to {@link RandomPortDistanceProvider} (placeholder).
      * Phase 7 replaces this with {@code new PostGisPortDistanceProvider(jdbcTemplate)}
