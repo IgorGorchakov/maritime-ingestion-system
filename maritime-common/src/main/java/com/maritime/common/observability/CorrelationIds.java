@@ -4,7 +4,7 @@ import java.util.UUID;
 
 /**
  * Shared correlation-id conventions used to trace a single vessel event across
- * the four services (ingestion → streaming → storage, plus the gateway).
+ * the four services (ingestion → streaming → storage, plus the api service).
  *
  * There is no synchronous HTTP call chain to carry trace context across the
  * asynchronous Kafka hops, so the id is generated once at the edge and then
@@ -19,7 +19,7 @@ public final class CorrelationIds {
     /** Kafka record header carrying the correlation id between services. */
     public static final String HEADER = "correlation-id";
 
-    /** Inbound/outbound HTTP header for the REST entrypoints (ingestion, gateway). */
+    /** Inbound/outbound HTTP header for the REST entrypoints (ingestion, api). */
     public static final String HTTP_HEADER = "X-Correlation-Id";
 
     /** MDC key; referenced by the logback pattern as {@code %X{correlationId}}. */

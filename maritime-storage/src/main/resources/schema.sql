@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS vessel_risk (
     zone_name          VARCHAR(128),
     zone_type          VARCHAR(32),
     -- Canonical Avro-JSON of the full EnrichedVesselEvent, returned verbatim by
-    -- GET /api/v1/vessels/{mmsi} so the gateway HTTP contract is a byte-for-byte
+    -- GET /api/v1/vessels/{mmsi} so the API service HTTP contract is a byte-for-byte
     -- round-trip. The flat columns above stay queryable for ad-hoc SQL / dashboards.
     payload            JSONB            NOT NULL
 );

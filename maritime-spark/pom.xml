@@ -37,11 +37,6 @@
         classpath conflicts. Submit with spark-submit; do not run via spring-boot:run.
     </description>
 
-    <!--
-        Override Spring Boot's dependency management for this module only.
-        We manage Spark, Hadoop, and Avro versions here; Spring BOM governs
-        everything else (Jackson is re-pinned below to match Spark 3.5).
-    -->
     <properties>
         <!-- Spark 3.5.x — latest stable line as of 2024 Q4. Scala 2.12 build
              used because it matches the cp-kafka:7.5.0 Scala runtime shipped
@@ -56,6 +51,10 @@
         <avro.version>1.11.3</avro.version>
         <!-- PostgreSQL JDBC driver for writing rollup results to PostGIS. -->
         <postgresql.version>42.7.1</postgresql.version>
+        <!-- H2 in-memory database used by unit tests to receive JDBC writes without
+             a real Postgres. Kept in sync with the version Spring Boot 3.2 manages
+             so we don't introduce a second H2 version on the classpath. -->
+        <h2.version>2.2.224</h2.version>
     </properties>
 
     <dependencies>
@@ -68,12 +67,6 @@
             <groupId>com.maritime</groupId>
             <artifactId>maritime-common</artifactId>
             <version>${project.version}</version>
-            <!--
-                Exclude spring-kafka and spring-web transitives: maritime-common
-                declares them as compile deps (for the interceptors etc.) but
-                Spark's driver classloader will see Spring Boot stubs and fail
-                to initialize if they're present at job submission time.
-            -->
             <exclusions>
                 <exclusion>
                     <groupId>org.springframework.kafka</groupId>
@@ -97,8 +90,8 @@
         <!--
             ── Spark core (provided at spark-submit time) ──────────────────────
             Mark as `provided` so these jars are NOT bundled into our shaded fat
-            JAR. When running locally via SparkSession.master("local[*]") in
-            tests/scripts, add them back via a `local` Maven profile (see below).
+            JAR. The `spark-test` profile below adds them back at `test` scope
+            so SparkSession is available during `mvn test`.
         -->
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -106,8 +99,6 @@
             <version>${spark.version}</version>
             <scope>provided</scope>
             <exclusions>
-                <!-- Spark bundles its own slf4j-log4j bridge; exclude to avoid
-                     multiple bindings on the classpath. -->
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
@@ -119,30 +110,18 @@
             </exclusions>
         </dependency>
 
-        <!--
-            ── Avro support ─────────────────────────────────────────────────────
-            avro runtime: already transitive via maritime-common but restated
-            explicitly to pin to our version and prevent Spark's older bundled
-            Avro from winning the dependency resolution race.
-        -->
+        <!-- ── Avro support ──────────────────────────────────────────────────── -->
         <dependency>
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
         </dependency>
 
-        <!--
-            parquet-avro: bridges Avro SpecificRecords to Parquet column format.
-            This is the key dep that the storage service also gains (in a separate
-            exclusion-trimmed form) for writing Parquet to S3.
-        -->
         <dependency>
             <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-avro</artifactId>
             <version>${parquet.version}</version>
             <exclusions>
-                <!-- Parquet bundles hadoop-client transitively; spark-submit already
-                     provides Hadoop (incl. LocalFileSystem) on its classpath. -->
                 <exclusion>
                     <groupId>org.apache.hadoop</groupId>
                     <artifactId>hadoop-client</artifactId>
@@ -150,21 +129,14 @@
             </exclusions>
         </dependency>
 
-        <!--
-            ── PostgreSQL JDBC — bundled in fat JAR ─────────────────────────────
-            Spark jobs write rollups to PostGIS via JDBC. The driver must be in
-            the fat JAR (or supplied at submit time) because it is NOT part of
-            Spark's default classpath.
-        -->
+        <!-- ── PostgreSQL JDBC — bundled in fat JAR ──────────────────────────── -->
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>${postgresql.version}</version>
         </dependency>
 
-        <!-- Logging — use slf4j-simple so job logs are readable in local mode.
-             Spark provides its own log4j2 bridge in cluster mode (provided scope
-             would drop this at spark-submit time). -->
+        <!-- Logging -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
@@ -175,15 +147,36 @@
             <artifactId>slf4j-simple</artifactId>
             <version>2.0.9</version>
         </dependency>
+
+        <!--
+            ── Test dependencies ────────────────────────────────────────────────
+
+            JUnit 5 + AssertJ.
+            spring-boot-starter-test is declared in the parent <dependencies>
+            block (test scope) and is inherited here, providing JUnit Jupiter,
+            AssertJ, and Mockito.
+
+            H2 in-memory database: receives the JDBC writes from writeToPostgres()
+            during unit tests so no real Postgres is required. H2 MODE=PostgreSQL
+            handles the column types Spark emits (BIGINT, DOUBLE, VARCHAR, DATE).
+            The table is created automatically by Spark's df.write().jdbc() when
+            it does not exist.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>${h2.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
-    <!--
-        `local` profile: adds `provided` deps back to the runtime classpath so
-        jobs can be executed directly via `mvn exec:java` or IDE run config
-        (SparkSession.master("local[*]")) without a real Spark cluster.
-        NOT included in CI builds or spark-submit deployments.
-    -->
     <profiles>
+        <!--
+            `local` profile: adds `provided` deps back to the runtime classpath so
+            jobs can be executed directly via `mvn exec:java` or IDE run config
+            (SparkSession.master("local[*]")) without a real Spark cluster.
+            NOT included in CI builds or spark-submit deployments.
+        -->
         <profile>
             <id>local</id>
             <dependencies>
@@ -205,21 +198,82 @@
                 </dependency>
             </dependencies>
         </profile>
+
+        <!--
+            `spark-test` profile: adds spark-sql_2.12 at `test` scope so
+            SparkSession is on the classpath during `mvn test` / `mvn verify`.
+
+            Why a separate profile and not just changing the main dep to `test`?
+              - The main dep must stay `provided` so it is excluded from the
+                shaded fat JAR (spark-submit supplies it at runtime).
+              - Maven does not allow the same artifact at two scopes in one POM.
+              - A profile is the standard Maven pattern for this use case.
+
+            Usage:
+              mvn test -Pspark-test              # run unit tests only
+              mvn verify -Pspark-test            # run unit + integration tests
+              CI should always pass -Pspark-test when building this module.
+        -->
+        <profile>
+            <id>spark-test</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-sql_2.12</artifactId>
+                    <version>${spark.version}</version>
+                    <scope>test</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>org.slf4j</groupId>
+                            <artifactId>slf4j-log4j12</artifactId>
+                        </exclusion>
+                        <exclusion>
+                            <groupId>log4j</groupId>
+                            <artifactId>log4j</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
     </profiles>
 
     <build>
         <plugins>
             <!--
-                maven-shade-plugin: produces maritime-spark-<version>-shaded.jar.
+                maven-surefire-plugin: unit tests (*Test classes, not *IT).
+                The spark-test profile must be active for tests to compile.
+                Surefire needs additional JVM flags for Spark 3.5 on Java 17:
+                Spark's Kryo serializer and some internal reflection calls require
+                access to JDK internals that are restricted by default in Java 17+.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes><exclude>**/*IT.java</exclude></excludes>
+                    <!--
+                        Spark 3.5 + Java 17: open internal JDK modules that Spark
+                        reflects into. Without these flags tests fail with
+                        InaccessibleObjectException during SparkSession startup.
+                    -->
+                    <argLine>
+                        --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.lang.invoke=ALL-UNNAMED
+                        --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                        --add-opens java.base/java.io=ALL-UNNAMED
+                        --add-opens java.base/java.net=ALL-UNNAMED
+                        --add-opens java.base/java.nio=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.util.concurrent=ALL-UNNAMED
+                        --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED
+                        --add-opens java.base/sun.security.action=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
 
-                Why shade and not spring-boot-maven-plugin?
-                  1. spring-boot-maven-plugin nests deps under BOOT-INF/lib/ and
-                     rewrites the manifest to use a custom classloader. Spark's
-                     driver ClassLoader cannot read this layout — it expects a flat
-                     classpath jar.
-                  2. We need to *relocate* conflicting packages (e.g. Guava, Jackson)
-                     that Spark already bundles so our copy doesn't shadow Spark's
-                     internal usage.
+            <!--
+                maven-shade-plugin: produces maritime-spark-<version>-shaded.jar.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -236,8 +290,6 @@
                             <shadedClassifierName>shaded</shadedClassifierName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <filters>
-                                <!-- Strip module-info and signature files that break
-                                     the shaded jar's integrity checks. -->
                                 <filter>
                                     <artifact>*:*</artifact>
                                     <excludes>
@@ -249,24 +301,16 @@
                                 </filter>
                             </filters>
                             <relocations>
-                                <!--
-                                    Relocate our PostgreSQL driver away from any
-                                    Spark-internal JDBC usage to prevent ClassCastException
-                                    when registering drivers in java.sql.DriverManager.
-                                -->
                                 <relocation>
                                     <pattern>org.postgresql</pattern>
                                     <shadedPattern>com.maritime.shaded.postgresql</shadedPattern>
                                 </relocation>
                             </relocations>
                             <transformers>
-                                <!-- Merge META-INF/services SPI registrations
-                                     (required for parquet-avro codec registration). -->
                                 <transformer implementation=
                                     "org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation=
                                     "org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <!-- Default main; overridden at spark-submit time via the class flag. -->
                                     <mainClass>com.maritime.spark.jobs.DailyVesselAggregatesJob</mainClass>
                                 </transformer>
                             </transformers>
@@ -275,8 +319,7 @@
                 </executions>
             </plugin>
 
-            <!-- Disable Spring Boot repackage goal explicitly — this module must
-                 NOT inherit it even if the parent were ever changed to include it. -->
+            <!-- Disable Spring Boot repackage goal — this module must never be repackaged. -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

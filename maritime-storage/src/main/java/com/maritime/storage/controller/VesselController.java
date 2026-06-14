@@ -2,6 +2,7 @@ package com.maritime.storage.controller;
 
 import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.dto.VesselEvent;
+import com.maritime.common.kafka.Topics;
 import com.maritime.common.serde.AvroJson;
 import com.maritime.storage.service.ColdTierWriter;
 import com.maritime.storage.service.VesselStateStore;
@@ -42,7 +43,7 @@ public class VesselController {
      * Consumes base enriched events (zone + risk, no detection flags).
      * This is the primary cold + hot tier write path for every vessel event.
      */
-    @KafkaListener(topics = "maritime.enriched", groupId = "storage-service")
+    @KafkaListener(topics = Topics.ENRICHED, groupId = "storage-service")
     public void consumeEnrichedEvent(EnrichedVesselEvent event, Acknowledgment ack) {
         persist(event, ack);
     }
@@ -58,7 +59,7 @@ public class VesselController {
      * We upsert into the same Postgres hot tier so a GET /vessels/{mmsi}
      * immediately reflects the latest detection state.
      */
-    @KafkaListener(topics = "maritime.detections", groupId = "storage-service")
+    @KafkaListener(topics = Topics.DETECTIONS, groupId = "storage-service")
     public void consumeDetectionEvent(EnrichedVesselEvent event, Acknowledgment ack) {
         persist(event, ack);
     }

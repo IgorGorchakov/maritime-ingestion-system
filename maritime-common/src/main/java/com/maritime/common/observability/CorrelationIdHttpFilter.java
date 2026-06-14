@@ -11,9 +11,9 @@ import java.io.IOException;
 
 /**
  * Establishes a correlation id for every inbound HTTP request at the REST edges
- * (ingestion, gateway, storage query API).
+ * (ingestion, api, storage query API).
  *
- * <p>If the caller already sent an {@code X-Correlation-Id} header (e.g. the gateway
+ * <p>If the caller already sent an {@code X-Correlation-Id} header (e.g. the api service
  * forwarding to storage), it is honoured so the trace stays continuous; otherwise a
  * fresh id is minted. The id is bound to MDC for the duration of the request, echoed
  * back on the response header for the caller, and always cleared in {@code finally}

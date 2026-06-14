@@ -7,7 +7,7 @@ MVNW := ./mvnw
 .DEFAULT_GOAL := help
 
 .PHONY: help up down logs build test clean \
-        run-ingestion run-streaming run-storage run-gateway
+        run-ingestion run-enricher run-storage run-api
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -37,14 +37,14 @@ clean: ## Remove all build output
 run-ingestion: ## Run ingestion service (:8081)
 	$(MVNW) -pl maritime-ingestion spring-boot:run
 
-run-streaming: ## Run streaming/enrichment service (:8082)
-	$(MVNW) -pl maritime-streaming spring-boot:run
+run-enricher: ## Run enricher service (:8082)
+	$(MVNW) -pl maritime-enricher spring-boot:run
 
 run-storage: ## Run storage service (:8083)
 	$(MVNW) -pl maritime-storage spring-boot:run
 
-run-gateway: ## Run gateway/API service (:8084)
-	$(MVNW) -pl maritime-gateway spring-boot:run
+run-api: ## Run API service (:8084)
+	$(MVNW) -pl maritime-api spring-boot:run
 
 ## ---- Spark batch jobs ----
 spark-build: ## Build the shaded Spark fat JAR

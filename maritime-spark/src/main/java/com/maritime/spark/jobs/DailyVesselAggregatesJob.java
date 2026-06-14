@@ -38,7 +38,7 @@ import static org.apache.spark.sql.functions.*;
  * This job is the <em>batch layer</em>: it computes exact aggregates over the
  * complete immutable cold tier, complementing the <em>speed layer</em>
  * (MaritimeTopology) which produces approximate near-real-time detections.
- * The gateway serving layer merges both views.
+ * The API service serving layer merges both views.
  *
  * <h3>Parquet partitioning</h3>
  * The storage service writes {@code file://<coldTierDir>/vessel-events/date=<date>/mmsi=<mmsi>/<epochMs>.parquet}.

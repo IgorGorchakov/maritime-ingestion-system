@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
  * JSON (de)serialization for Avro {@link SpecificRecordBase} records.
  *
  * <p>On the Kafka wire we use compact binary Avro framed with a Schema Registry id.
- * But the non-Kafka paths — the S3 cold-tier payload and the storage-to-gateway HTTP
+ * But the non-Kafka paths — the S3 cold-tier payload and the storage-to-api HTTP
  * hop — are not Kafka, so they cannot reuse {@code KafkaAvroSerializer}. Plain Jackson
  * cannot round-trip a {@code SpecificRecord} (logical types, nullable unions, the
  * generated builder), so we use Avro's own JSON encoder here instead. The schema embedded

@@ -10,7 +10,7 @@ import java.util.Optional;
  *
  * <p>This is a storage port — the controller depends only on this interface, not
  * on whatever backs it. The default implementation
- * ({@link PostgresVesselStateStore}) upserts into a local Postgres table so the
+ * ({@link PostgresVesselStateHotStore}) upserts into a local Postgres table so the
  * platform runs entirely on localhost with no AWS/DynamoDB dependency.
  */
 public interface VesselStateStore {

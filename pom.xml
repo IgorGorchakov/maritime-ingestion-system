@@ -15,9 +15,9 @@
     <modules>
         <module>maritime-common</module>
         <module>maritime-ingestion</module>
-        <module>maritime-streaming</module>
+        <module>maritime-enricher</module>
         <module>maritime-storage</module>
-        <module>maritime-gateway</module>
+        <module>maritime-api</module>
         <module>maritime-spark</module>
     </modules>
 

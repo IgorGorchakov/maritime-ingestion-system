@@ -1,6 +1,7 @@
 package com.maritime.ingestion.controller;
 
 import com.maritime.common.dto.VesselEvent;
+import com.maritime.common.kafka.Topics;
 import com.maritime.common.observability.CorrelationIds;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -37,8 +38,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RestController
 @RequestMapping("/api/v1/simulate")
 public class AisSimulatorController {
-
-    private static final String TOPIC = "maritime.ais.raw";
 
     // ── Fixed MMSIs for reproducible demo scenarios ──────────────────────────
     private static final String MMSI_NORMAL        = "123456789";
@@ -190,7 +189,7 @@ public class AisSimulatorController {
         String correlationId = CorrelationIds.newId();
         MDC.put(CorrelationIds.MDC_KEY, correlationId);
         try {
-            kafkaTemplate.send(TOPIC, event.getMmsi(), event).whenComplete((result, ex) -> {
+            kafkaTemplate.send(Topics.AIS_RAW, event.getMmsi(), event).whenComplete((result, ex) -> {
                 MDC.put(CorrelationIds.MDC_KEY, correlationId);
                 try {
                     if (ex == null) {

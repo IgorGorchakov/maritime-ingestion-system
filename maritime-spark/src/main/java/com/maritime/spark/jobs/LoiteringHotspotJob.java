@@ -38,26 +38,28 @@ import static org.apache.spark.sql.functions.*;
  * </pre>
  *
  * <h3>Downstream use</h3>
- * The gateway serves this table as a GeoJSON feature collection (Phase 8 /
+ * The API service serves this table as a GeoJSON feature collection (Phase 8 /
  * MCP tool). Grafana can also query it directly via the PostgreSQL data source.
  */
 public class LoiteringHotspotJob {
 
-    private static final Logger log = LoggerFactory.getLogger(LoiteringHotspotJob.class);
     static final String TARGET_TABLE = "loitering_hotspots";
-
-    /** Grid cell side length in degrees. */
+    private static final Logger log = LoggerFactory.getLogger(LoiteringHotspotJob.class);
+    /**
+     * Grid cell side length in degrees.
+     */
     private static final double GRID_DEG = 0.1;
 
-    /** Number of top cells to retain in the output table. */
+    /**
+     * Number of top cells to retain in the output table.
+     */
     private static final int TOP_N = 50;
 
     public static void main(String[] args) {
         JobConfig cfg = JobConfig.fromEnv();
         log.info("LoiteringHotspotJob starting — date={}", cfg.batchDate);
 
-        SparkSession spark = SparkSessionFactory.createLocal(
-                "LoiteringHotspot-" + cfg.batchDate);
+        SparkSession spark = SparkSessionFactory.createLocal("LoiteringHotspot-" + cfg.batchDate);
 
         run(spark, cfg);
         spark.stop();
