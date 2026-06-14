@@ -34,27 +34,27 @@ import java.util.Map;
  */
 public class AvroEnrichedEventSerdes implements Serde<EnrichedVesselEvent> {
 
-    private final KafkaAvroSerializer   ser;
+    private final KafkaAvroSerializer ser;
     private final KafkaAvroDeserializer deser;
 
     // Thin adapters that delegate to the single shared ser/deser instances.
     // Defined as fields (not anonymous lambdas) so close() reaches them.
-    private final Serializer<EnrichedVesselEvent>   serializer;
+    private final Serializer<EnrichedVesselEvent> serializer;
     private final Deserializer<EnrichedVesselEvent> deserializer;
 
     public AvroEnrichedEventSerdes(String schemaRegistryUrl) {
         Map<String, Object> config = Map.of(
-                "schema.registry.url",                              schemaRegistryUrl,
+                "schema.registry.url", schemaRegistryUrl,
                 KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, true
         );
 
-        ser  = new KafkaAvroSerializer();
+        ser = new KafkaAvroSerializer();
         ser.configure(config, false);   // isKey = false (value serde)
 
         deser = new KafkaAvroDeserializer();
         deser.configure(config, false);
 
-        serializer   = (topic, data) -> ser.serialize(topic, data);
+        serializer = ser::serialize;
         deserializer = (topic, data) -> (EnrichedVesselEvent) deser.deserialize(topic, data);
     }
 
