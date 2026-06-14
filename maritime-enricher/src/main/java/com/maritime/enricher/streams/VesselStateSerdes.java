@@ -9,7 +9,7 @@ import org.apache.kafka.common.serialization.Serializer;
 
 /**
  * JSON-based Serde for {@link VesselState}, used by the Kafka Streams state store.
- *
+ * <p>
  * We use JSON (not Avro) here intentionally: VesselState is internal topology
  * state that never leaves the streaming service — it lives in RocksDB and the
  * internal changelog topic. Adding it to Schema Registry would create schema-
