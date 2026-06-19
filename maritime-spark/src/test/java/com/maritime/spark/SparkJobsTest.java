@@ -4,7 +4,6 @@ import com.maritime.spark.jobs.DailyVesselAggregatesJob;
 import com.maritime.spark.jobs.JobWriter;
 import com.maritime.spark.jobs.LoiteringHotspotJob;
 import com.maritime.spark.jobs.RiskRollupJob;
-import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
@@ -12,9 +11,12 @@ import org.apache.spark.sql.types.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.sql.DataSource;
+import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.*;
+import java.util.logging.Logger;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -23,31 +25,31 @@ import static org.assertj.core.api.Assertions.*;
  * {@link RiskRollupJob}, and {@link LoiteringHotspotJob}.
  *
  * <h3>Strategy — no Postgres, no Spring context, no Testcontainers</h3>
- * Each job is now a plain {@code @Component} with constructor injection, so tests
+ * Each job is a {@code @Component} with constructor injection, so tests
  * instantiate jobs directly — no reflection, no {@code SpringRunner}, no
- * {@code ApplicationContext}. H2 in-memory database receives the JDBC writes, so
- * the full {@code execute()} path runs without a real Postgres.
+ * {@code ApplicationContext}. H2 in-memory database receives the JDBC writes,
+ * so the full {@code execute()} path runs without a real Postgres.
  *
  * <h3>Test structure</h3>
  * <ol>
  *   <li>Write synthetic Parquet to a {@code @TempDir}.</li>
- *   <li>Build a {@link SparkJobProperties} pointing at that dir and an H2 URL.</li>
- *   <li>Build a {@link JobWriter} backed by the same H2 URL.</li>
- *   <li>Construct the job under test by passing the above via its constructor.</li>
- *   <li>Call {@code job.execute()} — the transformation runs end-to-end.</li>
- *   <li>Open a plain JDBC connection to H2 and assert the written rows.</li>
+ *   <li>Build {@link SparkJobProperties} pointing at that dir and an H2 URL.</li>
+ *   <li>Build {@link JobWriter} backed by the same URL via {@link #writer}.</li>
+ *   <li>Construct the job under test via its public constructor.</li>
+ *   <li>Call {@code job.execute()} — transformation runs end-to-end.</li>
+ *   <li>Open a JDBC connection to H2 and assert the written rows.</li>
  * </ol>
  *
  * <h3>SparkSession lifecycle</h3>
  * One {@code local[1]} session is shared across all tests via
- * {@code @BeforeAll}/{@code @AfterAll}. Starting a SparkSession costs ~3–5 s;
+ * {@code @BeforeAll}/{@code @AfterAll}. SparkSession startup costs ~3–5 s;
  * sharing one keeps the full suite under 30 s.
  *
  * <h3>callUDF audit — RiskRollupJob</h3>
  * {@link RiskRollupJob} uses {@code expr("approx_percentile(...)")} — NOT
  * {@code callUDF("approx_percentile", ...)}. If that ever regresses,
- * {@link #riskRollup_percentiles_computedWithoutCallUDF} catches it immediately
- * with an {@code AnalysisException} at plan-analysis time.
+ * {@link #riskRollup_percentiles_computedWithoutCallUDF} catches it at
+ * plan-analysis time with an {@code AnalysisException}.
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SparkJobsTest {
@@ -106,11 +108,13 @@ class SparkJobsTest {
 
     // ── Fixture helpers ───────────────────────────────────────────────────────
 
-    static String writeFixtureParquet(Path tempDir, List<Row> rows) {
-        Dataset<Row> df = spark.createDataFrame(rows, ENRICHED_SCHEMA);
-        String basePath = "file://" + tempDir.toAbsolutePath() + "/vessel-events";
-        df.drop("mmsi_key").write().mode("overwrite").partitionBy("date").parquet(basePath);
-        return basePath;
+    static void writeFixtureParquet(Path tempDir, List<Row> rows) {
+        spark.createDataFrame(rows, ENRICHED_SCHEMA)
+             .drop("mmsi_key")
+             .write()
+             .mode("overwrite")
+             .partitionBy("date")
+             .parquet("file://" + tempDir.toAbsolutePath() + "/vessel-events");
     }
 
     static Row row(String mmsi, double speed, double riskScore,
@@ -129,25 +133,23 @@ class SparkJobsTest {
     }
 
     /**
-     * Unique H2 in-memory URL per test — prevents table name collisions between
-     * tests that run in the same JVM. {@code DB_CLOSE_DELAY=-1} keeps the DB
-     * alive so the assertion connection can read what Spark wrote.
+     * Unique H2 in-memory URL per test — prevents table collisions across tests
+     * that run in the same JVM. {@code DB_CLOSE_DELAY=-1} keeps the database
+     * alive until the JVM exits so the assertion connection can read what Spark
+     * wrote after Spark closes its own connection.
      */
     static String h2Url(String name) {
         return "jdbc:h2:mem:" + name + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
     }
 
     /**
-     * Build a {@link SparkJobProperties} pointing at {@code tempDir} and {@code h2Url}.
-     *
-     * <p>Previously this required reflection into {@code JobConfig}'s private
-     * constructor. Now that {@code SparkJobProperties} is a plain {@code @Component}
-     * with a public constructor, we just call it directly.
+     * Build {@link SparkJobProperties} directly — no reflection, no Spring context.
+     * The constructor is public; tests supply values inline.
      */
-    static SparkJobProperties props(Path tempDir, String h2Url) {
+    static SparkJobProperties props(Path tempDir, String dbUrl) {
         return new SparkJobProperties(
                 tempDir.toAbsolutePath().toString(),  // coldTierDir
-                h2Url,                                // dbUrl → H2
+                dbUrl,                                // dbUrl → H2
                 "sa",                                 // dbUser (H2 default)
                 "",                                   // dbPass (H2 default)
                 BATCH_DATE                            // batchDate
@@ -155,16 +157,39 @@ class SparkJobsTest {
     }
 
     /**
-     * Build a {@link JobWriter} connected to the given H2 URL.
+     * Build a {@link JobWriter} for tests.
      *
-     * <p>JobWriter is now a Spring bean, but its constructor is public —
-     * tests construct it directly without an ApplicationContext.
-     * The DataSource is supplied as a simple lambda that returns an H2 connection,
-     * matching the interface JobWriter needs (only {@code getConnection()} is called,
-     * to resolve the JDBC URL from metadata).
+     * <p>{@link JobWriter} takes a {@link DataSource} in its constructor so the
+     * production {@link com.maritime.spark.config.SparkConfig} can inject a
+     * HikariCP pool. In tests we supply a minimal implementation that covers the
+     * two abstract methods of {@code DataSource}: {@code getConnection()} and
+     * {@code getConnection(String, String)}.
+     *
+     * <p>We cannot use a lambda here because {@code DataSource} is not a
+     * functional interface — it declares two abstract overloads of
+     * {@code getConnection}. An anonymous class is the correct approach.
      */
     static JobWriter writer(SparkJobProperties p) {
-        javax.sql.DataSource ds = () -> DriverManager.getConnection(p.getDbUrl(), p.getDbUser(), p.getDbPass());
+        DataSource ds = new DataSource() {
+            @Override
+            public Connection getConnection() throws SQLException {
+                return DriverManager.getConnection(p.getDbUrl(), p.getDbUser(), p.getDbPass());
+            }
+
+            @Override
+            public Connection getConnection(String user, String password) throws SQLException {
+                return DriverManager.getConnection(p.getDbUrl(), user, password);
+            }
+
+            // ── Remaining DataSource methods — not used by JobWriter ──────────
+            @Override public PrintWriter getLogWriter()                          { return null; }
+            @Override public void setLogWriter(PrintWriter out)                  {}
+            @Override public void setLoginTimeout(int seconds)                   {}
+            @Override public int  getLoginTimeout()                              { return 0; }
+            @Override public Logger getParentLogger()                            { return null; }
+            @Override public <T> T unwrap(Class<T> iface)                       { return null; }
+            @Override public boolean isWrapperFor(Class<?> iface)               { return false; }
+        };
         return new JobWriter(p, ds);
     }
 
@@ -174,16 +199,14 @@ class SparkJobsTest {
     @Order(1)
     @DisplayName("DailyVesselAggregatesJob — one aggregated row per MMSI with correct values")
     void dailyAggregates_oneRowPerVessel_correctAggregates(@TempDir Path tempDir) throws Exception {
-        List<Row> rows = List.of(
+        writeFixtureParquet(tempDir, List.of(
                 row("111111111", 10.0, 15.0, false, false),
                 row("111111111", 20.0, 30.0, true,  false),
                 row("111111111", 15.0, 60.0, false, true),
                 row("222222222",  5.0, 10.0, false, false),
                 row("222222222", 25.0, 55.0, false, true)
-        );
-        writeFixtureParquet(tempDir, rows);
+        ));
         SparkJobProperties p = props(tempDir, h2Url("daily1"));
-
         new DailyVesselAggregatesJob(spark, p, writer(p)).execute();
 
         try (Connection c = DriverManager.getConnection(h2Url("daily1"), "sa", "");
@@ -200,12 +223,14 @@ class SparkJobsTest {
             assertThat(a.eventCount)     .isEqualTo(3L);
             assertThat(a.avgSpeed)       .isCloseTo(15.0, within(0.01));
             assertThat(a.maxSpeed)       .isCloseTo(20.0, within(0.01));
+            // avg_risk_score = (15 + 30 + 60) / 3 = 35.0
             assertThat(a.avgRisk)        .isCloseTo(35.0, within(0.01));
             assertThat(a.restrictedCount).isEqualTo(1L);
             assertThat(a.loiteringCount) .isEqualTo(1L);
 
             ResultRow b = byMmsi.get("222222222");
             assertThat(b.eventCount)     .isEqualTo(2L);
+            // avg speed = (5 + 25) / 2 = 15.0
             assertThat(b.avgSpeed)       .isCloseTo(15.0, within(0.01));
             assertThat(b.maxSpeed)       .isCloseTo(25.0, within(0.01));
             assertThat(b.restrictedCount).isEqualTo(1L);
@@ -219,7 +244,6 @@ class SparkJobsTest {
     void dailyAggregates_dateFilter_excludesWrongDates(@TempDir Path tempDir) throws Exception {
         writeFixtureParquet(tempDir, List.of(row("333333333", 12.0, 20.0, false, false)));
         SparkJobProperties p = props(tempDir, h2Url("daily2"));
-
         new DailyVesselAggregatesJob(spark, p, writer(p)).execute();
 
         try (Connection c = DriverManager.getConnection(h2Url("daily2"), "sa", "");
@@ -239,7 +263,7 @@ class SparkJobsTest {
         DailyVesselAggregatesJob job = new DailyVesselAggregatesJob(spark, p, writer(p));
 
         job.execute();
-        job.execute();
+        job.execute(); // second run must not double the row count
 
         try (Connection c = DriverManager.getConnection(h2Url("daily3"), "sa", "");
              Statement  s = c.createStatement();
@@ -256,11 +280,14 @@ class SparkJobsTest {
     @Order(4)
     @DisplayName("RiskRollupJob — expr(approx_percentile) executes without AnalysisException")
     void riskRollup_percentiles_computedWithoutCallUDF(@TempDir Path tempDir) throws Exception {
+        // 10 events with risk scores 10, 20, …, 100. Theoretical p50 ≈ 55, p95 ≈ 95.
         List<Row> rows = new ArrayList<>();
         for (int i = 1; i <= 10; i++) rows.add(row("555555555", 10.0, i * 10.0, false, false));
         writeFixtureParquet(tempDir, rows);
         SparkJobProperties p = props(tempDir, h2Url("risk1"));
 
+        // An AnalysisException would be thrown here at plan-analysis time if
+        // callUDF() were used instead of expr() for approx_percentile.
         assertThatCode(() -> new RiskRollupJob(spark, p, writer(p)).execute())
                 .doesNotThrowAnyException();
 
@@ -271,6 +298,7 @@ class SparkJobsTest {
                      "FROM vessel_risk_percentiles WHERE mmsi='555555555'")) {
             assertThat(r.next()).isTrue();
             assertThat(r.getLong("sample_count")).isEqualTo(10L);
+            // approx_percentile at accuracy=100 has ~1% relative error
             assertThat(r.getDouble("p50_risk")).isBetween(45.0, 65.0);
             assertThat(r.getDouble("p95_risk")).isBetween(85.0, 100.0);
             assertThat(r.getDouble("p95_risk")).isGreaterThanOrEqualTo(r.getDouble("p50_risk"));
@@ -283,7 +311,6 @@ class SparkJobsTest {
     void riskRollup_singleEvent_p50EqualsP95(@TempDir Path tempDir) throws Exception {
         writeFixtureParquet(tempDir, List.of(row("666666666", 5.0, 75.0, false, false)));
         SparkJobProperties p = props(tempDir, h2Url("risk2"));
-
         new RiskRollupJob(spark, p, writer(p)).execute();
 
         try (Connection c = DriverManager.getConnection(h2Url("risk2"), "sa", "");
@@ -303,15 +330,15 @@ class SparkJobsTest {
     @Order(6)
     @DisplayName("LoiteringHotspotJob — positions snapped to 0.1° cells with correct counts")
     void loiteringHotspot_gridSnapping_correct(@TempDir Path tempDir) throws Exception {
-        List<Row> rows = List.of(
-                row("777777777", 30.05, -89.05, 0.5, 10.0, true, false),
-                row("777777777", 30.07, -89.08, 0.3, 10.0, true, false),
-                row("888888888", 30.02, -89.02, 0.4, 10.0, true, false),
-                row("999999999", 30.15, -89.05, 0.2, 10.0, true, false)
-        );
-        writeFixtureParquet(tempDir, rows);
+        // Three events in cell (30.0, -89.1) from 2 vessels, one event in adjacent cell.
+        // SW corner of 0.1° cell: floor(lat/0.1)*0.1, floor(lon/0.1)*0.1.
+        writeFixtureParquet(tempDir, List.of(
+                row("777777777", 30.05, -89.05, 0.5, 10.0, true, false),  // → cell (30.0, -89.1)
+                row("777777777", 30.07, -89.08, 0.3, 10.0, true, false),  // → cell (30.0, -89.1)
+                row("888888888", 30.02, -89.02, 0.4, 10.0, true, false),  // → cell (30.0, -89.1)
+                row("999999999", 30.15, -89.05, 0.2, 10.0, true, false)   // → cell (30.1, -89.1)
+        ));
         SparkJobProperties p = props(tempDir, h2Url("hotspot1"));
-
         new LoiteringHotspotJob(spark, p, writer(p)).execute();
 
         try (Connection c = DriverManager.getConnection(h2Url("hotspot1"), "sa", "");
@@ -319,6 +346,7 @@ class SparkJobsTest {
              ResultSet  r = s.executeQuery(
                      "SELECT cell_lat, cell_lon, event_count, vessel_count " +
                      "FROM loitering_hotspots ORDER BY event_count DESC")) {
+
             assertThat(r.next()).isTrue();
             assertThat(r.getLong("event_count")) .isEqualTo(3L);
             assertThat(r.getLong("vessel_count")).isEqualTo(2L);
@@ -333,29 +361,30 @@ class SparkJobsTest {
 
     @Test
     @Order(7)
-    @DisplayName("LoiteringHotspotJob — no loitering events skips JDBC write")
+    @DisplayName("LoiteringHotspotJob — no loitering events skips JDBC write entirely")
     void loiteringHotspot_noLoiteringEvents_skipsWrite(@TempDir Path tempDir) throws Exception {
         writeFixtureParquet(tempDir, List.of(
                 row("111222333", 12.0, 10.0, false, false),
                 row("444555666", 14.0, 20.0, false, false)
         ));
         SparkJobProperties p = props(tempDir, h2Url("hotspot2"));
-
         new LoiteringHotspotJob(spark, p, writer(p)).execute();
 
-        try (Connection c = DriverManager.getConnection(h2Url("hotspot2"), "sa", "")) {
-            try (ResultSet tables = c.getMetaData().getTables(null, null, "LOITERING_HOTSPOTS", null)) {
-                assertThat(tables.next())
-                        .as("table must not exist when no loitering events")
-                        .isFalse();
-            }
+        // Job returns early before df.write().jdbc() — table must not exist in H2.
+        try (Connection c = DriverManager.getConnection(h2Url("hotspot2"), "sa", "");
+             ResultSet tables = c.getMetaData()
+                     .getTables(null, null, "LOITERING_HOTSPOTS", null)) {
+            assertThat(tables.next())
+                    .as("loitering_hotspots table must not be created when no loitering events")
+                    .isFalse();
         }
     }
 
     @Test
     @Order(8)
-    @DisplayName("LoiteringHotspotJob — output capped at TOP_N=50 rows")
+    @DisplayName("LoiteringHotspotJob — output capped at TOP_N=50 rows when input exceeds that")
     void loiteringHotspot_topNLimit_atMost50Rows(@TempDir Path tempDir) throws Exception {
+        // 60 events in 60 distinct 0.1° cells — output must be capped at 50.
         List<Row> rows = new ArrayList<>();
         for (int i = 0; i < 60; i++) {
             rows.add(row(String.format("%09d", 100_000_000 + i),
@@ -363,7 +392,6 @@ class SparkJobsTest {
         }
         writeFixtureParquet(tempDir, rows);
         SparkJobProperties p = props(tempDir, h2Url("hotspot3"));
-
         new LoiteringHotspotJob(spark, p, writer(p)).execute();
 
         try (Connection c = DriverManager.getConnection(h2Url("hotspot3"), "sa", "");
@@ -371,13 +399,14 @@ class SparkJobsTest {
              ResultSet  r = s.executeQuery("SELECT COUNT(*) FROM loitering_hotspots")) {
             r.next();
             assertThat(r.getLong(1))
-                    .as("capped at TOP_N=50")
-                    .isLessThanOrEqualTo(50L);
+                    .as("output must be capped at TOP_N=%d", LoiteringHotspotJob.TOP_N)
+                    .isLessThanOrEqualTo(LoiteringHotspotJob.TOP_N);
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /** Value object for reading aggregated result rows from a JDBC {@link ResultSet}. */
     static class ResultRow {
         final long   eventCount, restrictedCount, loiteringCount;
         final double avgSpeed, maxSpeed, avgRisk;

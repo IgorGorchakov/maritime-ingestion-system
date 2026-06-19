@@ -47,13 +47,15 @@ import static org.apache.spark.sql.functions.*;
 public class LoiteringHotspotJob implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(LoiteringHotspotJob.class);
-    static final String TARGET_TABLE = "loitering_hotspots";
 
-    /** Grid cell side length in degrees. */
-    static final double GRID_DEG = 0.1;
+    /** Target Postgres table name. */
+    public static final String TARGET_TABLE = "loitering_hotspots";
 
-    /** Maximum number of cells written per run. */
-    static final int TOP_N = 50;
+    /** Grid cell side length in degrees (≈ 11 km at the equator). */
+    public static final double GRID_DEG = 0.1;
+
+    /** Maximum number of hotspot cells written per run. */
+    public static final int TOP_N = 50;
 
     private final SparkSession       spark;
     private final SparkJobProperties props;

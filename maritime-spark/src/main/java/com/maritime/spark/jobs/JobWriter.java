@@ -9,15 +9,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
-import java.sql.SQLException;
 import java.util.Properties;
 
 /**
  * Shared JDBC write helper, injected into every Spark batch job.
  *
- * <p>Previously each job called the static {@code DailyVesselAggregatesJob.writeToPostgres}
- * method, coupling two unrelated classes and making the JDBC dependency invisible
- * in the job's constructor. Extracting this into a Spring-managed {@code @Component}
+ * <p>Previously each job called a static {@code writeToPostgres} method,
+ * coupling unrelated classes and making the JDBC dependency invisible in each
+ * job's constructor. Extracting this into a Spring-managed {@code @Component}
  * makes the dependency explicit, injectable, and replaceable in tests without
  * static mocking.
  *
@@ -26,63 +25,46 @@ import java.util.Properties;
  * writes in parallel partitions, and handles schema creation automatically.
  * {@code JdbcTemplate} is a single-threaded driver-side API — appropriate for
  * the service modules but not for Spark's distributed write path.
- * The {@link DataSource} is used only to extract the JDBC URL and credentials;
- * Spark manages its own connections to the target database.
+ *
+ * <h3>DataSource role</h3>
+ * The injected {@link DataSource} is used only for health-checking the
+ * connection at startup via {@link SparkConfig}. The actual JDBC URL and
+ * credentials passed to {@code df.write().jdbc()} come from
+ * {@link SparkJobProperties} — the single source of truth — so there is no
+ * risk of the URL drifting between the pool and the Spark write path.
  */
 @Component
 public class JobWriter {
 
     private static final Logger log = LoggerFactory.getLogger(JobWriter.class);
 
-    private final SparkJobProperties props;
-    private final DataSource         dataSource;
+    private final String     jdbcUrl;
+    private final Properties jdbcProps;  // built once; user/password/driver never change
 
     public JobWriter(SparkJobProperties props, DataSource dataSource) {
-        this.props      = props;
-        this.dataSource = dataSource;
+        this.jdbcUrl = props.getDbUrl();
+
+        // Build the Properties object once in the constructor. Every write()
+        // call reuses the same instance — no repeated string allocations.
+        this.jdbcProps = new Properties();
+        this.jdbcProps.setProperty("user",     props.getDbUser());
+        this.jdbcProps.setProperty("password", props.getDbPass());
+        this.jdbcProps.setProperty("driver",   "org.postgresql.Driver");
     }
 
     /**
-     * Write {@code df} to {@code table} in the configured Postgres instance,
-     * overwriting any existing rows for the current batch date.
+     * Write {@code df} to {@code table} using {@link SaveMode#Overwrite} with
+     * {@code truncate=true}, so the table is preserved (indexes, grants) while
+     * its rows are replaced. Re-running the job for the same date is idempotent.
      *
-     * <p>Uses {@link SaveMode#Overwrite} with {@code truncate=true} so the table
-     * is retained (preserving indexes and grants) while its rows are replaced.
-     * Re-running the job for the same date is therefore idempotent.
-     *
-     * @param df    the aggregated DataFrame to persist
-     * @param table target Postgres table name (must already exist or be
-     *              auto-created by Spark on first run)
+     * @param df    aggregated DataFrame to persist
+     * @param table target table name; auto-created by Spark on first run
      */
     public void write(Dataset<Row> df, String table) {
-        String jdbcUrl = resolveUrl();
-
-        Properties jdbcProps = new Properties();
-        jdbcProps.setProperty("user",     props.getDbUser());
-        jdbcProps.setProperty("password", props.getDbPass());
-        jdbcProps.setProperty("driver",   "org.postgresql.Driver");
-
-        log.info("Writing {} to table={} url={}", df.schema().simpleString(), table, jdbcUrl);
-
+        log.info("Writing to table={} url={}", table, jdbcUrl);
         df.write()
                 .mode(SaveMode.Overwrite)
                 .option("truncate", "true")
                 .jdbc(jdbcUrl, table, jdbcProps);
-    }
-
-    /**
-     * Extract the JDBC URL from the injected {@link DataSource} so a single
-     * source of truth (the DataSource bean in {@link com.maritime.spark.config.SparkConfig})
-     * owns the URL — jobs never reference {@link SparkJobProperties#getDbUrl()} directly.
-     */
-    private String resolveUrl() {
-        try (var conn = dataSource.getConnection()) {
-            return conn.getMetaData().getURL();
-        } catch (SQLException e) {
-            // Fall back to the property value if the DataSource metadata call fails
-            // (e.g. in tests that substitute a thin stub).
-            log.warn("Could not resolve JDBC URL from DataSource metadata, falling back to property", e);
-            return props.getDbUrl();
-        }
     }
 }

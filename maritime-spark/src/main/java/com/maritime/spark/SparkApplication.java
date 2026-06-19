@@ -8,6 +8,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
+import org.springframework.core.annotation.AnnotationAwareOrderComparator;
+
+import java.util.List;
 
 /**
  * Entry point for the Maritime Spark batch layer.
@@ -17,15 +20,20 @@ import org.springframework.context.annotation.PropertySource;
  * machinery, which pulls in Spring Boot's managed versions of Jackson, Avro, and
  * Netty — all version-conflicting with Spark 3.x's own bundled copies. Using
  * {@link AnnotationConfigApplicationContext} directly starts only the Spring IoC
- * container (DI, {@code @Value}, {@code @Scheduled}, {@link org.springframework.boot.ApplicationRunner})
+ * container (DI, {@code @Value}, {@link org.springframework.boot.ApplicationRunner})
  * with zero autoconfiguration, keeping Spark's classpath isolated.
  *
- * <h3>Job execution</h3>
- * Each Spark job is a Spring {@link org.springframework.stereotype.Component}
- * implementing {@link org.springframework.boot.ApplicationRunner}. After the
- * context is refreshed, this class iterates the {@code ApplicationRunner} beans
- * in {@link org.springframework.core.annotation.Order} order and invokes them,
- * replicating the behaviour Spring Boot provides without its autoconfiguration.
+ * <h3>Job execution order</h3>
+ * All {@link org.springframework.boot.ApplicationRunner} beans are collected and
+ * sorted by {@link AnnotationAwareOrderComparator}, which respects both
+ * {@link org.springframework.core.annotation.Order @Order} annotations and
+ * {@link org.springframework.core.Ordered} implementations — exactly what
+ * {@code SpringApplication} uses internally. The three jobs are ordered:
+ * <ol>
+ *   <li>{@code DailyVesselAggregatesJob} — {@code @Order(1)}</li>
+ *   <li>{@code RiskRollupJob}            — {@code @Order(2)}</li>
+ *   <li>{@code LoiteringHotspotJob}      — {@code @Order(3)}</li>
+ * </ol>
  *
  * <h3>Running via spark-submit</h3>
  * <pre>{@code
@@ -55,28 +63,30 @@ public class SparkApplication {
 
             ApplicationArguments appArgs = new DefaultApplicationArguments(args);
 
-            // Run all ApplicationRunner beans in @Order sequence.
-            // This mirrors what SpringApplication does without loading autoconfiguration.
-            ctx.getBeansOfType(org.springframework.boot.ApplicationRunner.class)
-               .entrySet()
-               .stream()
-               .sorted(java.util.Comparator.comparingInt(e ->
-                       org.springframework.core.annotation.AnnotationUtils
-                               .findAnnotation(e.getValue().getClass(),
-                                       org.springframework.core.annotation.Order.class) != null
-                               ? org.springframework.core.annotation.AnnotationUtils
-                                       .findAnnotation(e.getValue().getClass(),
-                                               org.springframework.core.annotation.Order.class).value()
-                               : Integer.MAX_VALUE))
-               .forEach(e -> {
-                   try {
-                       log.info("Running job: {}", e.getKey());
-                       e.getValue().run(appArgs);
-                   } catch (Exception ex) {
-                       log.error("Job {} failed", e.getKey(), ex);
-                       throw new RuntimeException("Job execution failed: " + e.getKey(), ex);
-                   }
-               });
+            // Collect all ApplicationRunner beans and sort by @Order using Spring's
+            // AnnotationAwareOrderComparator — the same comparator SpringApplication
+            // uses. This correctly resolves @Order, Ordered, and PriorityOrdered,
+            // whereas the previous manual AnnotationUtils sort operated on the
+            // unsorted entrySet() stream and produced alphabetical-by-bean-name
+            // order rather than the intended @Order sequence.
+            List<org.springframework.boot.ApplicationRunner> runners =
+                    ctx.getBeansOfType(org.springframework.boot.ApplicationRunner.class)
+                       .values()
+                       .stream()
+                       .sorted(AnnotationAwareOrderComparator.INSTANCE)
+                       .toList();
+
+            for (org.springframework.boot.ApplicationRunner runner : runners) {
+                String name = runner.getClass().getSimpleName();
+                try {
+                    log.info("Running job: {}", name);
+                    runner.run(appArgs);
+                    log.info("Job complete: {}", name);
+                } catch (Exception ex) {
+                    log.error("Job failed: {}", name, ex);
+                    throw new RuntimeException("Job execution failed: " + name, ex);
+                }
+            }
         }
 
         log.info("Maritime Spark Application finished");
