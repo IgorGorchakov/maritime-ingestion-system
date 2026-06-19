@@ -13,7 +13,7 @@ import java.util.Optional;
  * ({@link PostgresVesselStateHotStore}) upserts into a local Postgres table so the
  * platform runs entirely on localhost with no AWS/DynamoDB dependency.
  */
-public interface VesselStateStore {
+public interface VesselStateHotStore {
 
     /** Insert or replace the latest state for the event's vessel (upsert by MMSI). */
     void upsert(EnrichedVesselEvent event);

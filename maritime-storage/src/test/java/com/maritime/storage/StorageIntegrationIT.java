@@ -3,7 +3,7 @@ package com.maritime.storage;
 import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.dto.VesselEvent;
 import com.maritime.storage.service.ColdTierWriter;
-import com.maritime.storage.service.VesselStateStore;
+import com.maritime.storage.service.VesselStateHotStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Integration tests for the storage tier.
  *
  * <h3>Scope</h3>
- * Tests the hot tier ({@link VesselStateStore} → Postgres) and cold tier
+ * Tests the hot tier ({@link VesselStateHotStore} → Postgres) and cold tier
  * ({@link ColdTierWriter} → local Parquet) directly via the storage port
  * interfaces, without involving Kafka. This isolates persistence behaviour from
  * broker availability and runs in CI with no external infrastructure beyond
@@ -90,7 +90,8 @@ class StorageIntegrationIT {
                 "org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration");
     }
 
-    @Autowired VesselStateStore stateStore;
+    @Autowired
+    VesselStateHotStore stateStore;
     @Autowired ColdTierWriter   coldTier;
 
     // ── Fixture builder ───────────────────────────────────────────────────────

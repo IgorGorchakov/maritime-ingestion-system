@@ -1,4 +1,4 @@
-package com.maritime.enricher.streams;
+package com.maritime.detection.streams;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -8,12 +8,13 @@ import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serializer;
 
 /**
- * JSON-based Serde for {@link VesselState}, used by the Kafka Streams state store.
- * <p>
- * We use JSON (not Avro) here intentionally: VesselState is internal topology
- * state that never leaves the streaming service — it lives in RocksDB and the
- * internal changelog topic. Adding it to Schema Registry would create schema-
- * governance overhead with no consumer benefit.
+ * JSON-based Serde for {@link VesselState}, used by the Kafka Streams RocksDB
+ * state store and its internal changelog topic.
+ *
+ * JSON (not Avro) is used intentionally: {@link VesselState} is internal topology
+ * state that never leaves the detection service. Adding it to Schema Registry would
+ * create schema-governance overhead with no consumer benefit. JSON is also human-
+ * readable in the changelog topic, which aids debugging.
  */
 public class VesselStateSerdes implements Serde<VesselState> {
 
@@ -21,9 +22,11 @@ public class VesselStateSerdes implements Serde<VesselState> {
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-    @Override
-    public Serializer<VesselState> serializer() {
-        return (topic, data) -> {
+    private final Serializer<VesselState>   serializer;
+    private final Deserializer<VesselState> deserializer;
+
+    public VesselStateSerdes() {
+        serializer = (topic, data) -> {
             if (data == null) return null;
             try {
                 return MAPPER.writeValueAsBytes(data);
@@ -31,11 +34,7 @@ public class VesselStateSerdes implements Serde<VesselState> {
                 throw new RuntimeException("Failed to serialize VesselState", e);
             }
         };
-    }
-
-    @Override
-    public Deserializer<VesselState> deserializer() {
-        return (topic, data) -> {
+        deserializer = (topic, data) -> {
             if (data == null) return null;
             try {
                 return MAPPER.readValue(data, VesselState.class);
@@ -44,4 +43,7 @@ public class VesselStateSerdes implements Serde<VesselState> {
             }
         };
     }
+
+    @Override public Serializer<VesselState>   serializer()   { return serializer; }
+    @Override public Deserializer<VesselState> deserializer() { return deserializer; }
 }

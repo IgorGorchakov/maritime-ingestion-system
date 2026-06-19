@@ -12,8 +12,8 @@ import java.util.Random;
  * A real distance-to-port lookup requires a port gazetteer — either a PostGIS
  * table populated from a GeoJSON dataset or an in-memory spatial index. That
  * data pipeline is deferred to Phase 7. This class holds the placeholder
- * logic that was previously inlined in {@code RiskScorerService}, making the
- * temporary nature explicit and the real implementation easy to swap in.
+ * logic that was previously inlined in {@code RiskScorerEnrichService}, making
+ * the temporary nature explicit and the real implementation easy to swap in.
  *
  * <h3>Replacing this</h3>
  * Phase 7 will introduce {@code PostGisPortDistanceProvider}, which runs:
@@ -26,13 +26,13 @@ import java.util.Random;
  * ORDER BY geom <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)
  * LIMIT 1
  * }</pre>
- * To activate it, register it as a {@code @Primary} bean (or remove this one)
- * in {@link com.maritime.enricher.config.PipelineConfig}.
+ * To activate it, replace the {@link com.maritime.enricher.config.PipelineConfig#portDistanceProvider()}
+ * bean body — no other file needs to change.
  *
  * <h3>Thread safety</h3>
- * {@link Random} is not thread-safe for concurrent callers, but the variance
- * from occasional races is inconsequential for a placeholder. The real
- * implementation will use a thread-safe spatial query.
+ * A new {@link Random} instance is created per call, which is safe but slightly
+ * wasteful. Acceptable for a placeholder; the real implementation will use a
+ * thread-safe PostGIS query via Spring's {@code JdbcTemplate}.
  */
 @Slf4j
 public class RandomPortDistanceProvider implements PortDistanceProvider {
@@ -40,9 +40,9 @@ public class RandomPortDistanceProvider implements PortDistanceProvider {
     @Override
     public double distanceToNearestPortNm(double latitudeDeg, double longitudeDeg) {
         double distanceNm = new Random().nextDouble() * 100;
-        log.debug("RandomPortDistanceProvider: returning placeholder distance {:.1f} NM "
-                + "for ({}, {}) — replace with PostGisPortDistanceProvider in Phase 7",
-                distanceNm, latitudeDeg, longitudeDeg);
+        log.debug("RandomPortDistanceProvider: placeholder distance {} NM for ({}, {}) "
+                + "— replace with PostGisPortDistanceProvider in Phase 7",
+                String.format("%.1f", distanceNm), latitudeDeg, longitudeDeg);
         return distanceNm;
     }
 }

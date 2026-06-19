@@ -10,32 +10,33 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>maritime-enricher</artifactId>
-    <name>Maritime Enricher Service</name>
+    <artifactId>maritime-detection</artifactId>
+    <name>Maritime Detection Service</name>
     <description>
-        Stateless ETL pipeline: validate, deduplicate, enrich with PostGIS zone data,
-        score risk, and publish to maritime.enriched. No Kafka Streams dependency —
-        stateful detection has moved to the maritime-detection module.
+        Stateful Kafka Streams topology for per-vessel behavioural detection:
+        loitering, speed anomaly, and dark vessel. Consumes maritime.enriched,
+        publishes flagged events to maritime.detections. No Postgres dependency —
+        state lives in RocksDB, replicated via the Streams changelog topic.
     </description>
 
     <dependencies>
+        <!-- Avro DTOs (EnrichedVesselEvent, VesselEvent), Topics constants, GeoUtils -->
         <dependency>
             <groupId>com.maritime</groupId>
             <artifactId>maritime-common</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <!-- Spring Boot web slice: provides the actuator HTTP server on port 8086.
+             spring-boot-starter (non-web) would work too if you prefer no embedded
+             Tomcat, but actuator's /actuator/prometheus endpoint requires a servlet
+             context, so web is the simpler choice here. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.kafka</groupId>
-            <artifactId>spring-kafka</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.github.ben-manes.caffeine</groupId>
-            <artifactId>caffeine</artifactId>
-        </dependency>
+
+        <!-- Actuator: /actuator/health + /actuator/prometheus -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
@@ -45,17 +46,33 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
             <scope>runtime</scope>
         </dependency>
-        <!-- PostGIS zone catalog via Spring Data JPA + PostgreSQL -->
+
+        <!-- Kafka Streams DSL — the only Kafka dependency this module needs.
+             spring-kafka is intentionally absent: the topology uses the native
+             Kafka Streams client, not Spring's @KafkaListener container. -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-streams</artifactId>
         </dependency>
+
+        <!-- Avro serde for EnrichedVesselEvent via Confluent Schema Registry.
+             Used by AvroEnrichedEventSerdes (consumeSerde + produceSerde). -->
         <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
         </dependency>
-        <!-- Testcontainers for PipelineIntegrationIT (Kafka + Schema Registry) -->
+
+        <!-- VesselStateSerdes uses Jackson with JavaTimeModule to serialize
+             Instant fields in VesselState to/from JSON for the RocksDB changelog. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- ── Test dependencies ──────────────────────────────────────────── -->
+        <!-- spring-boot-starter-test (JUnit 5 + AssertJ) is inherited from
+             the parent POM's <dependencies> block at test scope. -->
+
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
@@ -76,18 +93,11 @@
             <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- spring-kafka-test provides KafkaTestUtils and consumer helpers -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka-test</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
     </dependencies>
 

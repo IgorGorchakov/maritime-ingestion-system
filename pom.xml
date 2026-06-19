@@ -16,6 +16,7 @@
         <module>maritime-common</module>
         <module>maritime-ingestion</module>
         <module>maritime-enricher</module>
+        <module>maritime-detection</module>
         <module>maritime-storage</module>
         <module>maritime-api</module>
         <module>maritime-spark</module>
@@ -34,18 +35,12 @@
         <confluent.version>7.5.1</confluent.version>
         <caffeine.version>3.1.8</caffeine.version>
         <logstash-logback-encoder.version>7.4</logstash-logback-encoder.version>
-        <!-- Phase 5: test stack versions -->
         <testcontainers.version>1.19.3</testcontainers.version>
         <awaitility.version>4.2.0</awaitility.version>
-        <!-- Phase 5: maven-surefire (unit tests) + failsafe (integration tests) -->
-        <!-- surefire runs *Test classes in test phase; failsafe runs *IT classes  -->
-        <!-- in integration-test phase. CI calls `./mvnw verify` to run both.     -->
         <surefire.version>3.2.2</surefire.version>
         <failsafe.version>3.2.2</failsafe.version>
     </properties>
 
-    <!-- Confluent hosts kafka-avro-serializer + the registry client here;
-         these artifacts are not on Maven Central. -->
     <repositories>
         <repository>
             <id>confluent</id>
@@ -74,8 +69,6 @@
                 <artifactId>avro</artifactId>
                 <version>${avro.version}</version>
             </dependency>
-            <!-- Wraps Avro (de)serialization + the Schema Registry client; pulls in
-                 io.confluent:kafka-schema-registry-client transitively. -->
             <dependency>
                 <groupId>io.confluent</groupId>
                 <artifactId>kafka-avro-serializer</artifactId>
@@ -86,7 +79,6 @@
                 <artifactId>caffeine</artifactId>
                 <version>${caffeine.version}</version>
             </dependency>
-            <!-- Phase 5: Testcontainers BOM — covers kafka, postgresql modules -->
             <dependency>
                 <groupId>org.testcontainers</groupId>
                 <artifactId>testcontainers-bom</artifactId>
@@ -125,7 +117,6 @@
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>${surefire.version}</version>
                     <configuration>
-                        <!-- Unit tests: exclude *IT (integration) classes -->
                         <excludes><exclude>**/*IT.java</exclude></excludes>
                     </configuration>
                 </plugin>
@@ -142,7 +133,6 @@
                         </execution>
                     </executions>
                     <configuration>
-                        <!-- Integration tests: only *IT classes -->
                         <includes><include>**/*IT.java</include></includes>
                     </configuration>
                 </plugin>
@@ -155,13 +145,7 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <configuration>
-                        <!-- Retain method parameter names in bytecode. Spring MVC needs them to
-                             bind @PathVariable/@RequestParam without an explicit name; we don't
-                             inherit spring-boot-starter-parent (which would add this), so set it
-                             ourselves. Without it, /vessels/{mmsi} fails at runtime. -->
                         <parameters>true</parameters>
-                        <!-- JDK 23+ no longer runs classpath annotation processors implicitly,
-                             so Lombok must be declared on the processor path explicitly. -->
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>

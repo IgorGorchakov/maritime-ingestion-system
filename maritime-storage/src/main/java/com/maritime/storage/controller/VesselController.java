@@ -5,7 +5,7 @@ import com.maritime.common.dto.VesselEvent;
 import com.maritime.common.kafka.Topics;
 import com.maritime.common.serde.AvroJson;
 import com.maritime.storage.service.ColdTierWriter;
-import com.maritime.storage.service.VesselStateStore;
+import com.maritime.storage.service.VesselStateHotStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
  * </ul>
  *
  * <p>The controller depends only on the {@link ColdTierWriter} and
- * {@link VesselStateStore} storage ports — it never references the concrete backing
+ * {@link VesselStateHotStore} storage ports — it never references the concrete backing
  * store, so swapping filesystem/Postgres for S3/DynamoDB (or anything else) needs no
  * change here.
  */
@@ -32,11 +32,11 @@ import org.springframework.web.bind.annotation.*;
 public class VesselController {
 
     private final ColdTierWriter coldTier;
-    private final VesselStateStore stateStore;
+    private final VesselStateHotStore hostTier;
 
-    public VesselController(ColdTierWriter coldTier, VesselStateStore stateStore) {
+    public VesselController(ColdTierWriter coldTier, VesselStateHotStore hostTier) {
         this.coldTier   = coldTier;
-        this.stateStore = stateStore;
+        this.hostTier = hostTier;
     }
 
     /**
@@ -73,18 +73,22 @@ public class VesselController {
         VesselEvent vessel = event.getVesselEvent();
 
         coldTier.write(event);     // cold tier: Parquet, partitioned by date=/mmsi=
-        stateStore.upsert(event);  // hot tier: latest state per MMSI
+        hostTier.upsert(event);  // hot tier: latest state per MMSI
 
         // Offset committed only after both writes succeed.
         ack.acknowledge();
         log.info("Persisted MMSI={} riskLevel={} loitering={} dark={} speedAnomaly={}",
-                vessel.getMmsi(), event.getRiskLevel(),
-                event.getLoitering(), event.getDarkVessel(), event.getSpeedAnomaly());
+                vessel.getMmsi(),
+                event.getRiskLevel(),
+                event.getLoitering(),
+                event.getDarkVessel(),
+                event.getSpeedAnomaly()
+        );
     }
 
     @GetMapping(value = "/vessels/{mmsi}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> getVesselRisk(@PathVariable String mmsi) {
-        return stateStore.findByMmsi(mmsi)
+        return hostTier.findByMmsi(mmsi)
                 .map(AvroJson::toJson)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());

@@ -24,7 +24,7 @@ import java.util.Optional;
  */
 @Slf4j
 @Repository
-public class PostgresVesselStateHotStore implements VesselStateStore {
+public class PostgresVesselStateHotStore implements VesselStateHotStore {
 
     private final JdbcTemplate jdbc;
 

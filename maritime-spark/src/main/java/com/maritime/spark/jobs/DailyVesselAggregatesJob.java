@@ -1,15 +1,15 @@
 package com.maritime.spark.jobs;
 
-import com.maritime.spark.JobConfig;
-import com.maritime.spark.SparkSessionFactory;
+import com.maritime.spark.SparkJobProperties;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.sql.SaveMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.Properties;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
 
 import static org.apache.spark.sql.functions.*;
 
@@ -17,94 +17,94 @@ import static org.apache.spark.sql.functions.*;
  * Batch job: daily per-vessel aggregates from the Parquet cold tier.
  *
  * <h3>What it does</h3>
- * Reads all Parquet files for {@code BATCH_DATE}, groups by MMSI, and writes
- * one row per vessel per day to the {@code vessel_daily_stats} table in PostGIS.
+ * Reads all Parquet files for {@code spark.job.batch-date}, groups by MMSI, and
+ * writes one row per vessel per day to the {@code vessel_daily_stats} table in
+ * PostGIS.
  *
  * <h3>Output schema (vessel_daily_stats)</h3>
  * <pre>
- * mmsi              VARCHAR(9)     — vessel identifier
- * date              DATE           — partition date
- * event_count       BIGINT         — number of AIS reports received
- * avg_speed_kn      DOUBLE         — average speed over ground
- * max_speed_kn      DOUBLE         — maximum speed over ground
- * avg_risk_score    DOUBLE         — mean risk score across the day
- * restricted_count  BIGINT         — reports where inRestrictedZone=true
- * loitering_count   BIGINT         — reports where loitering=true
- * dark_vessel_count BIGINT         — reports where darkVessel=true
- * speed_anomaly_count BIGINT       — reports where speedAnomaly=true
+ * mmsi                VARCHAR(9)
+ * date                DATE
+ * event_count         BIGINT    — AIS reports received
+ * avg_speed_kn        DOUBLE    — average SOG over the day
+ * max_speed_kn        DOUBLE    — maximum SOG over the day
+ * avg_risk_score      DOUBLE    — mean risk score
+ * restricted_count    BIGINT    — reports where inRestrictedZone=true
+ * loitering_count     BIGINT    — reports where loitering=true
+ * dark_vessel_count   BIGINT    — reports where darkVessel=true
+ * speed_anomaly_count BIGINT    — reports where speedAnomaly=true
  * </pre>
  *
  * <h3>Lambda architecture role</h3>
  * This job is the <em>batch layer</em>: it computes exact aggregates over the
  * complete immutable cold tier, complementing the <em>speed layer</em>
- * (MaritimeTopology) which produces approximate near-real-time detections.
- * The API service serving layer merges both views.
+ * ({@code MaritimeTopology} in {@code maritime-detection}) which produces
+ * approximate near-real-time detections. The API service serving layer merges
+ * both views behind one contract.
  *
- * <h3>Parquet partitioning</h3>
- * The storage service writes {@code file://<coldTierDir>/vessel-events/date=<date>/mmsi=<mmsi>/<epochMs>.parquet}.
- * Spark's partition discovery reads the {@code date} and {@code mmsi} path
- * segments as virtual columns, so we can push a {@code WHERE date = ?} predicate
- * down to the filesystem and avoid reading unneeded partitions (partition pruning).
+ * <h3>Partition pruning</h3>
+ * {@code maritime-storage} writes Parquet to
+ * {@code <coldTierDir>/vessel-events/date=<date>/mmsi=<mmsi>/<epochMs>.parquet}.
+ * Spark's partition discovery reads the {@code date} path segment as a virtual
+ * column, allowing a {@code WHERE date = ?} predicate to skip all other
+ * date partitions at the filesystem level — O(1 day) not O(all time).
  *
- * <h3>Running locally</h3>
- * <pre>{@code
- * cd maritime-spark
- * mvn exec:java \
- *   -Plocal \
- *   -Dexec.mainClass=com.maritime.spark.jobs.DailyVesselAggregatesJob \
- *   -DBATCH_DATE=2024-01-15
- * }</pre>
+ * <h3>Idempotency</h3>
+ * Uses {@code SaveMode.Overwrite} with {@code truncate=true} — re-running for
+ * the same date replaces the existing rows without dropping the table.
  *
- * <h3>Running via spark-submit</h3>
- * <pre>{@code
- * spark-submit \
- *   --class com.maritime.spark.jobs.DailyVesselAggregatesJob \
- *   --master local[*] \
- *   target/maritime-spark-1.0.0-SNAPSHOT-shaded.jar
- * }</pre>
+ * <h3>Spring lifecycle</h3>
+ * Implements {@link ApplicationRunner}: Spring calls {@link #run} after the
+ * application context is fully initialised. {@code @Order(1)} ensures this job
+ * runs first when multiple {@code ApplicationRunner} beans are present.
  */
-public class DailyVesselAggregatesJob {
+@Component
+@Order(1)
+public class DailyVesselAggregatesJob implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DailyVesselAggregatesJob.class);
     static final String TARGET_TABLE = "vessel_daily_stats";
 
-    public static void main(String[] args) {
-        JobConfig cfg = JobConfig.fromEnv();
+    private final SparkSession       spark;
+    private final SparkJobProperties props;
+    private final JobWriter          writer;
+
+    public DailyVesselAggregatesJob(SparkSession spark,
+                                     SparkJobProperties props,
+                                     JobWriter writer) {
+        this.spark  = spark;
+        this.props  = props;
+        this.writer = writer;
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
         log.info("DailyVesselAggregatesJob starting — date={} input={}",
-                cfg.batchDate, cfg.parquetInputPath());
-
-        SparkSession spark = SparkSessionFactory.createLocal(
-                "DailyVesselAggregates-" + cfg.batchDate);
-
-        run(spark, cfg);
-        spark.stop();
+                props.getBatchDate(), props.parquetInputPath());
+        execute();
         log.info("DailyVesselAggregatesJob complete");
     }
 
     /**
-     * Core logic extracted for testability — accepts an already-built SparkSession
-     * so unit tests can pass an in-memory {@code SparkSession.master("local[1]")}.
+     * Core transformation logic — extracted so it is independently testable
+     * without an {@link ApplicationArguments} instance.
      */
-    public static void run(SparkSession spark, JobConfig cfg) {
-        // ── Read ──────────────────────────────────────────────────────────────
-        // Spark auto-discovers the date= and mmsi= partition columns from the path.
-        // We filter on date immediately so only one partition is loaded — this is
-        // the key partition-pruning optimisation: O(1 day) not O(all time).
+    public void execute() {
         Dataset<Row> raw = spark.read()
                 .format("parquet")
-                .option("mergeSchema", "false")   // schema is fixed; merging is slow
-                .load(cfg.parquetInputPath());
+                .option("mergeSchema", "false")
+                .load(props.parquetInputPath());
 
-        log.info("Loaded {} records for date={}", raw.count(), cfg.batchDate);
+        log.info("Loaded {} records for date={}", raw.count(), props.getBatchDate());
 
-        // ── Transform ─────────────────────────────────────────────────────────
-        // Parquet column names come from the Avro schema field names (camelCase).
-        // The vesselEvent fields are nested under a struct; use dot notation.
         Dataset<Row> aggregated = raw
-                .filter(col("date").equalTo(cfg.batchDate))   // belt-and-suspenders if path glob was broad
+                // Belt-and-suspenders date filter — parquetInputPath() already
+                // points at the date= partition, but an explicit filter here
+                // enables Spark to apply the predicate at the scan level too.
+                .filter(col("date").equalTo(props.getBatchDate()))
                 .groupBy(
                         col("vesselEvent.mmsi").alias("mmsi"),
-                        lit(cfg.batchDate).cast("date").alias("date")
+                        lit(props.getBatchDate()).cast("date").alias("date")
                 )
                 .agg(
                         count("*").alias("event_count"),
@@ -117,22 +117,7 @@ public class DailyVesselAggregatesJob {
                         sum(col("speedAnomaly").cast("int")).alias("speed_anomaly_count")
                 );
 
-        // ── Load ──────────────────────────────────────────────────────────────
-        writeToPostgres(aggregated, TARGET_TABLE, cfg);
+        writer.write(aggregated, TARGET_TABLE);
         log.info("Wrote {} vessel aggregates to {}", aggregated.count(), TARGET_TABLE);
-    }
-
-    static void writeToPostgres(Dataset<Row> df, String table, JobConfig cfg) {
-        Properties jdbcProps = new Properties();
-        jdbcProps.setProperty("user",   cfg.dbUser);
-        jdbcProps.setProperty("password", cfg.dbPass);
-        jdbcProps.setProperty("driver", "org.postgresql.Driver");
-
-        // Overwrite today's partition — re-running the job for the same date is
-        // idempotent. Use Append in production if you want an audit trail of runs.
-        df.write()
-                .mode(SaveMode.Overwrite)
-                .option("truncate", "true")     // reuse the table rather than DROP/CREATE
-                .jdbc(cfg.dbUrl, table, jdbcProps);
     }
 }

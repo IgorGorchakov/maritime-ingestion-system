@@ -1,19 +1,17 @@
 # Maritime Intelligence Platform — developer entrypoints.
-# One-command stack control + build/test so a reviewer never has to memorise flags.
-# Uses the committed Maven wrapper (./mvnw) for a reproducible toolchain.
 
 MVNW := ./mvnw
 
 .DEFAULT_GOAL := help
 
 .PHONY: help up down logs build test clean \
-        run-ingestion run-enricher run-storage run-api
+        run-ingestion run-enricher run-detection run-storage run-api
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-## ---- Infrastructure (Docker Compose) ----
+## ---- Infrastructure ----
 up: ## Start infra (Kafka, Schema Registry, Postgres, Prometheus :9090, Grafana :3000)
 	docker compose up -d
 
@@ -33,12 +31,15 @@ test: ## Full verify: unit + integration tests across all modules
 clean: ## Remove all build output
 	$(MVNW) clean
 
-## ---- Run services (each in its own terminal) ----
+## ---- Run services ----
 run-ingestion: ## Run ingestion service (:8081)
 	$(MVNW) -pl maritime-ingestion spring-boot:run
 
 run-enricher: ## Run enricher service (:8082)
 	$(MVNW) -pl maritime-enricher spring-boot:run
+
+run-detection: ## Run detection service (:8086)
+	$(MVNW) -pl maritime-detection spring-boot:run
 
 run-storage: ## Run storage service (:8083)
 	$(MVNW) -pl maritime-storage spring-boot:run
@@ -50,7 +51,7 @@ run-api: ## Run API service (:8084)
 spark-build: ## Build the shaded Spark fat JAR
 	$(MVNW) -pl maritime-spark package -DskipTests
 
-spark-daily: ## Run DailyVesselAggregatesJob locally (requires `local` profile)
+spark-daily: ## Run DailyVesselAggregatesJob locally
 	$(MVNW) -pl maritime-spark exec:java -Plocal \
 		-Dexec.mainClass=com.maritime.spark.jobs.DailyVesselAggregatesJob
 
@@ -61,5 +62,3 @@ spark-risk: ## Run RiskRollupJob locally
 spark-hotspot: ## Run LoiteringHotspotJob locally
 	$(MVNW) -pl maritime-spark exec:java -Plocal \
 		-Dexec.mainClass=com.maritime.spark.jobs.LoiteringHotspotJob
-
-spark-all: spark-build spark-daily spark-risk spark-hotspot ## Build + run all three Spark jobs
