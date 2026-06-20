@@ -11,12 +11,9 @@ import org.apache.spark.sql.types.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
-import javax.sql.DataSource;
-import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.*;
-import java.util.logging.Logger;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -34,8 +31,8 @@ import static org.assertj.core.api.Assertions.*;
  * <ol>
  *   <li>Write synthetic Parquet to a {@code @TempDir}.</li>
  *   <li>Build {@link SparkJobProperties} pointing at that dir and an H2 URL.</li>
- *   <li>Build {@link JobWriter} backed by the same URL via {@link #writer}.</li>
- *   <li>Construct the job under test via its public constructor.</li>
+ *   <li>Build a {@link JobWriter} via {@link #writer(SparkJobProperties)}.</li>
+ *   <li>Construct the job via its public constructor.</li>
  *   <li>Call {@code job.execute()} — transformation runs end-to-end.</li>
  *   <li>Open a JDBC connection to H2 and assert the written rows.</li>
  * </ol>
@@ -134,7 +131,7 @@ class SparkJobsTest {
 
     /**
      * Unique H2 in-memory URL per test — prevents table collisions across tests
-     * that run in the same JVM. {@code DB_CLOSE_DELAY=-1} keeps the database
+     * running in the same JVM. {@code DB_CLOSE_DELAY=-1} keeps the database
      * alive until the JVM exits so the assertion connection can read what Spark
      * wrote after Spark closes its own connection.
      */
@@ -144,7 +141,11 @@ class SparkJobsTest {
 
     /**
      * Build {@link SparkJobProperties} directly — no reflection, no Spring context.
-     * The constructor is public; tests supply values inline.
+     *
+     * <p>Note: {@link SparkJobProperties#validate()} is a {@code @PostConstruct}
+     * method — Spring calls it automatically in production but it does NOT run when
+     * the constructor is called directly in tests. This is intentional: tests supply
+     * controlled values and do not need the startup guard.
      */
     static SparkJobProperties props(Path tempDir, String dbUrl) {
         return new SparkJobProperties(
@@ -157,40 +158,15 @@ class SparkJobsTest {
     }
 
     /**
-     * Build a {@link JobWriter} for tests.
+     * Build a {@link JobWriter} backed by the H2 URL in {@code p}.
      *
-     * <p>{@link JobWriter} takes a {@link DataSource} in its constructor so the
-     * production {@link com.maritime.spark.config.SparkConfig} can inject a
-     * HikariCP pool. In tests we supply a minimal implementation that covers the
-     * two abstract methods of {@code DataSource}: {@code getConnection()} and
-     * {@code getConnection(String, String)}.
-     *
-     * <p>We cannot use a lambda here because {@code DataSource} is not a
-     * functional interface — it declares two abstract overloads of
-     * {@code getConnection}. An anonymous class is the correct approach.
+     * <p>{@link JobWriter} now takes only {@link SparkJobProperties} — no
+     * {@code DataSource}. It extracts the JDBC URL and credentials from
+     * {@code props} at construction time and passes them directly to
+     * {@code df.write().jdbc()}. No connection pool, no anonymous class needed.
      */
     static JobWriter writer(SparkJobProperties p) {
-        DataSource ds = new DataSource() {
-            @Override
-            public Connection getConnection() throws SQLException {
-                return DriverManager.getConnection(p.getDbUrl(), p.getDbUser(), p.getDbPass());
-            }
-
-            @Override
-            public Connection getConnection(String user, String password) throws SQLException {
-                return DriverManager.getConnection(p.getDbUrl(), user, password);
-            }
-
-            // ── Remaining DataSource methods — not used by JobWriter ──────────
-            @Override public PrintWriter getLogWriter()                          { return null; }
-            @Override public void setLogWriter(PrintWriter out)                  {}
-            @Override public void setLoginTimeout(int seconds)                   {}
-            @Override public int  getLoginTimeout()                              { return 0; }
-            @Override public Logger getParentLogger()                            { return null; }
-            @Override public <T> T unwrap(Class<T> iface)                       { return null; }
-            @Override public boolean isWrapperFor(Class<?> iface)               { return false; }
-        };
-        return new JobWriter(p, ds);
+        return new JobWriter(p);
     }
 
     // ── DailyVesselAggregatesJob ──────────────────────────────────────────────
@@ -330,7 +306,7 @@ class SparkJobsTest {
     @Order(6)
     @DisplayName("LoiteringHotspotJob — positions snapped to 0.1° cells with correct counts")
     void loiteringHotspot_gridSnapping_correct(@TempDir Path tempDir) throws Exception {
-        // Three events in cell (30.0, -89.1) from 2 vessels, one event in adjacent cell.
+        // Three events in cell (30.0, -89.1) from 2 vessels, one in adjacent cell.
         // SW corner of 0.1° cell: floor(lat/0.1)*0.1, floor(lon/0.1)*0.1.
         writeFixtureParquet(tempDir, List.of(
                 row("777777777", 30.05, -89.05, 0.5, 10.0, true, false),  // → cell (30.0, -89.1)
@@ -370,12 +346,12 @@ class SparkJobsTest {
         SparkJobProperties p = props(tempDir, h2Url("hotspot2"));
         new LoiteringHotspotJob(spark, p, writer(p)).execute();
 
-        // Job returns early before df.write().jdbc() — table must not exist in H2.
+        // execute() returns early via isEmpty() — table must not exist in H2.
         try (Connection c = DriverManager.getConnection(h2Url("hotspot2"), "sa", "");
              ResultSet tables = c.getMetaData()
                      .getTables(null, null, "LOITERING_HOTSPOTS", null)) {
             assertThat(tables.next())
-                    .as("loitering_hotspots table must not be created when no loitering events")
+                    .as("loitering_hotspots must not be created when no loitering events")
                     .isFalse();
         }
     }
@@ -384,7 +360,7 @@ class SparkJobsTest {
     @Order(8)
     @DisplayName("LoiteringHotspotJob — output capped at TOP_N=50 rows when input exceeds that")
     void loiteringHotspot_topNLimit_atMost50Rows(@TempDir Path tempDir) throws Exception {
-        // 60 events in 60 distinct 0.1° cells — output must be capped at 50.
+        // 60 events in 60 distinct 0.1° cells — output must be capped at TOP_N.
         List<Row> rows = new ArrayList<>();
         for (int i = 0; i < 60; i++) {
             rows.add(row(String.format("%09d", 100_000_000 + i),
