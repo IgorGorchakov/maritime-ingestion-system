@@ -99,44 +99,48 @@ public class AisSimulatorController {
     // ── Vessel-specific builders ─────────────────────────────────────────────
 
     /**
-     * Loiterer: stays near the RESTRICTED zone with tiny random drift and very
-     * low speed. After 5 min of sub-1-kn reports the loitering detector fires.
+     * Loiterer: smooth circular drift (~0.02° radius) centred near (-89.8, 30.1).
+     * Deterministic sin/cos avoids the jitter of Math.random() while still
+     * producing visible movement. Speed is well below the 1-kn loitering threshold.
      */
     private VesselEvent buildLoiterer(int t, Instant now) {
-        double lat = 30.1 + (Math.random() - 0.5) * 0.05;
-        double lon = -89.8 + (Math.random() - 0.5) * 0.05;
+        double angle = t * 0.2;   // radians; full circle every ~31 ticks (~62 s)
+        double lat = 30.10 + Math.sin(angle) * 0.02;
+        double lon = -89.80 + Math.cos(angle) * 0.02;
+        // Heading tangent to the circle
+        double heading = (Math.toDegrees(angle + Math.PI / 2) + 360) % 360;
         return vesselEvent(SimulatedVessel.LOITERER.mmsi, lat, lon,
-                SimulatedVessel.LOITERER.speed, SimulatedVessel.LOITERER.heading, now);
+                SimulatedVessel.LOITERER.speed, heading, now);
     }
 
     /**
-     * Dark vessel: transits normally until {@code DARK_VESSEL_SILENCE_AFTER} ticks,
-     * then the simulator stops emitting. The topology's wall-clock punctuator will
-     * flag it as dark after 10 minutes of silence.
+     * Dark vessel: slow north-east transit; stops transmitting after
+     * {@code DARK_VESSEL_SILENCE_AFTER} ticks so the dark-vessel punctuator fires.
      */
     private VesselEvent buildDarkVessel(int t, Instant now) {
-        double lat = 30.0 + t * 0.05;
-        double lon = -89.5 + t * 0.1;
+        double lat = 30.0 + t * 0.01;
+        double lon = -89.5 + t * 0.02;
         return vesselEvent(SimulatedVessel.DARK_VESSEL.mmsi, lat, lon,
-                SimulatedVessel.DARK_VESSEL.speed, SimulatedVessel.DARK_VESSEL.heading, now);
+                SimulatedVessel.DARK_VESSEL.speed, 45.0, now);
     }
 
     /**
      * Speed-anomaly vessel: reports SOG = 2 kn but jumps ~0.4° (~24 nm) per
-     * 2-second tick. The detector computes Haversine-implied speed and flags
-     * the divergence on the second report.
+     * 2-second tick. The detector flags the divergence from implied speed on the
+     * second report.
      */
     private VesselEvent buildSpeedAnomalyVessel(int t, Instant now) {
         double lat = 29.5 + (t % 10) * 0.4;
         double lon = -90.0 + (t % 6) * 0.4;
         return vesselEvent(SimulatedVessel.SPEED_ANOMALY.mmsi, lat, lon,
-                SimulatedVessel.SPEED_ANOMALY.speed, SimulatedVessel.SPEED_ANOMALY.heading, now);
+                SimulatedVessel.SPEED_ANOMALY.speed, 180.0, now);
     }
 
-    /** Generic waypoint follower — loops the vessel's waypoints indefinitely. */
+    /** Generic waypoint follower — interpolates smoothly between waypoints. */
     private VesselEvent buildWaypointVessel(SimulatedVessel vessel, int t, Instant now) {
-        double[] pos = vessel.positionAt(t);
-        return vesselEvent(vessel.mmsi, pos[0], pos[1], vessel.speed, vessel.heading, now);
+        double[] pos     = vessel.positionAt(t);
+        double   heading = vessel.headingAt(t);
+        return vesselEvent(vessel.mmsi, pos[0], pos[1], vessel.speed, heading, now);
     }
 
     // ── Shared factory ───────────────────────────────────────────────────────
