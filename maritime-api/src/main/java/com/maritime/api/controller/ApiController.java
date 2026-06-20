@@ -8,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
@@ -55,13 +56,17 @@ public class ApiController {
 
     @GetMapping(value = "/{mmsi}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> getVesselIntelligence(@PathVariable String mmsi) {
-        String json = restTemplate.getForObject(
-                storageServiceUrl + "/api/v1/vessels/" + mmsi, String.class);
-        if (json == null || json.isBlank()) {
+        try {
+            String json = restTemplate.getForObject(
+                    storageServiceUrl + "/api/v1/vessels/" + mmsi, String.class);
+            if (json == null || json.isBlank()) {
+                return ResponseEntity.notFound().build();
+            }
+            EnrichedVesselEvent vesselData = AvroJson.fromJson(json, EnrichedVesselEvent.class);
+            return ResponseEntity.ok(AvroJson.toJson(vesselData));
+        } catch (HttpClientErrorException.NotFound e) {
             return ResponseEntity.notFound().build();
         }
-        EnrichedVesselEvent vesselData = AvroJson.fromJson(json, EnrichedVesselEvent.class);
-        return ResponseEntity.ok(AvroJson.toJson(vesselData));
     }
 
     // ── Batch history endpoint (Phase 7) ─────────────────────────────────────
