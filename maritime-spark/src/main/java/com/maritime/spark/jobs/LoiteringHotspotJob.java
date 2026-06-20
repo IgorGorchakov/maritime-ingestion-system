@@ -78,9 +78,9 @@ public class LoiteringHotspotJob implements ApplicationRunner {
 
     public void execute() {
         Dataset<Row> raw = spark.read()
-                .format("parquet")
-                .option("mergeSchema", "false")
-                .load(props.parquetInputPath());
+                .format("json")
+                .option("multiLine", "false")
+                .load(props.inputPath());
 
         // count() here is the early-exit guard — one cheap action to decide
         // whether to proceed. Without it we'd have to attempt the full aggregation

@@ -75,9 +75,9 @@ public class RiskRollupJob implements ApplicationRunner {
 
     public void execute() {
         Dataset<Row> raw = spark.read()
-                .format("parquet")
-                .option("mergeSchema", "false")
-                .load(props.parquetInputPath());
+                .format("json")
+                .option("multiLine", "false")
+                .load(props.inputPath());
 
         Dataset<Row> rollup = raw
                 .filter(col("date").equalTo(props.getBatchDate()))

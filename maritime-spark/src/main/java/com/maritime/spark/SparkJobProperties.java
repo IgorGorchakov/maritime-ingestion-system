@@ -102,13 +102,18 @@ public class SparkJobProperties {
     public String getBatchDate()   { return batchDate; }
 
     /**
-     * Absolute {@code file://} URI for the Parquet partition matching
-     * {@link #getBatchDate()}. Spark's {@code LocalFileSystem} requires an
-     * absolute path — resolved here regardless of the job's working directory.
+     * Absolute {@code file://} URI for the JSON partition matching
+     * {@link #getBatchDate()}. Spark's LocalFileSystem requires an absolute path.
      */
-    public String parquetInputPath() {
+    public String inputPath() {
         String absBase = Path.of(coldTierDir).toAbsolutePath().normalize().toString();
         return String.format("file://%s/vessel-events/date=%s/", absBase, batchDate);
+    }
+
+    /** @deprecated Use {@link #inputPath()} */
+    @Deprecated
+    public String parquetInputPath() {
+        return inputPath();
     }
 
     private static boolean isBlank(String s) {

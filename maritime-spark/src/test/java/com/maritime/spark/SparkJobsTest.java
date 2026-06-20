@@ -111,7 +111,7 @@ class SparkJobsTest {
              .write()
              .mode("overwrite")
              .partitionBy("date")
-             .parquet("file://" + tempDir.toAbsolutePath() + "/vessel-events");
+             .json("file://" + tempDir.toAbsolutePath() + "/vessel-events");
     }
 
     static Row row(String mmsi, double speed, double riskScore,

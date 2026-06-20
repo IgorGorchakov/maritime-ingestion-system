@@ -85,9 +85,9 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
      */
     public void execute() {
         Dataset<Row> raw = spark.read()
-                .format("parquet")
-                .option("mergeSchema", "false")
-                .load(props.parquetInputPath());
+                .format("json")
+                .option("multiLine", "false")
+                .load(props.inputPath());
 
         Dataset<Row> aggregated = raw
                 .filter(col("date").equalTo(props.getBatchDate()))
