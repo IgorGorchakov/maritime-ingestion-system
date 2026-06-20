@@ -46,3 +46,10 @@ data/
 # ---- Local env / secrets ----
 .env
 *.local
+
+# ---- Frontend (maritime-frontend) ----
+maritime-frontend/node_modules/
+maritime-frontend/dist/
+maritime-frontend/.vite/
+maritime-frontend/dist-ssr/
+maritime-frontend/*.local
