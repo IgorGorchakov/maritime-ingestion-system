@@ -12,40 +12,31 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
-import java.util.concurrent.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * AIS simulator with realistic vessel tracks designed to exercise the Phase 6 detectors.
+ * AIS simulator — emits realistic vessel tracks for the full fleet defined in
+ * {@link SimulatedVessel}. Each vessel type exercises a different detector:
  *
- * <h3>Vessel fleet</h3>
- * <table>
- *   <tr><th>MMSI</th><th>Behaviour</th><th>Detector target</th></tr>
- *   <tr><td>123456789</td><td>Normal transit across the Gulf of Mexico</td><td>—</td></tr>
- *   <tr><td>234567890</td><td>Deliberate loiterer — drifts at 0.3 kn in a tight box</td>
- *       <td>loitering</td></tr>
- *   <tr><td>345678901</td><td>Transits normally, then stops transmitting after 12 reports
- *       (simulates transponder off)</td><td>dark vessel</td></tr>
- *   <tr><td>456789012</td><td>Reports speed=2 kn but moves 40 nm between ticks</td>
- *       <td>speed anomaly</td></tr>
- * </table>
+ * <ul>
+ *   <li>{@code LOITERER}      → loitering detector (speed &lt; 1 kn for 5+ min)</li>
+ *   <li>{@code DARK_VESSEL}   → dark-vessel punctuator (silent after 12 ticks)</li>
+ *   <li>{@code SPEED_ANOMALY} → speed-anomaly detector (implied speed vs. reported)</li>
+ * </ul>
  *
- * All vessels start in the Gulf of Mexico simulator area (-90..-80 lon, 29..32 lat)
- * so they overlap the seeded PostGIS zones (EEZ + Port of New Orleans).
+ * Adding vessels to the fleet requires only editing {@link SimulatedVessel}.
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/simulate")
 public class AisSimulatorController {
 
-    // ── Fixed MMSIs for reproducible demo scenarios ──────────────────────────
-    private static final String MMSI_NORMAL        = "123456789";
-    private static final String MMSI_LOITERER      = "234567890";
-    private static final String MMSI_DARK_VESSEL   = "345678901";
-    private static final String MMSI_SPEED_ANOMALY = "456789012";
-
-    /** After this many ticks the dark-vessel stops transmitting. */
+    /** After this many ticks the dark vessel stops transmitting. */
     private static final int DARK_VESSEL_SILENCE_AFTER = 12;
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
@@ -53,16 +44,7 @@ public class AisSimulatorController {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private volatile ScheduledFuture<?> task;
-
-    // Mutable track state — only written from the single scheduler thread.
     private final AtomicInteger tick = new AtomicInteger(0);
-
-    // Normal vessel: waypoints along the Gulf Coast eastbound.
-    private static final double[][] NORMAL_WAYPOINTS = {
-        {30.5, -90.0}, {30.6, -89.5}, {30.7, -89.0}, {30.8, -88.5},
-        {30.9, -88.0}, {31.0, -87.5}, {31.1, -87.0}, {31.2, -86.5},
-        {31.3, -86.0}, {31.4, -85.5}, {31.5, -85.0}, {31.6, -84.5}
-    };
 
     @Autowired
     public AisSimulatorController(KafkaTemplate<String, Object> kafkaTemplate,
@@ -78,8 +60,8 @@ public class AisSimulatorController {
         if (isRunning.compareAndSet(false, true)) {
             tick.set(0);
             task = scheduler.scheduleAtFixedRate(this::generateAndSendEvents, 0, 2, TimeUnit.SECONDS);
-            log.info("Simulation started — {} vessels in fleet", 4);
-            return "Simulation started (4-vessel fleet: normal, loiterer, dark-vessel, speed-anomaly)";
+            log.info("Simulation started — {} vessels in fleet", SimulatedVessel.values().length);
+            return String.format("Simulation started (%d-vessel fleet)", SimulatedVessel.values().length);
         }
         return "Simulation is already running";
     }
@@ -93,91 +75,80 @@ public class AisSimulatorController {
         return "Simulation is not running";
     }
 
+    // ── Event generation ─────────────────────────────────────────────────────
+
     private void generateAndSendEvents() {
         int t = tick.getAndIncrement();
         Instant now = Instant.now();
 
-        emit(buildNormalVessel(t, now));
-        emit(buildLoiterer(t, now));
-        if (t < DARK_VESSEL_SILENCE_AFTER) {
-            emit(buildDarkVessel(t, now));
+        for (SimulatedVessel vessel : SimulatedVessel.values()) {
+            VesselEvent event = buildEvent(vessel, t, now);
+            if (event != null) emit(event);
         }
-        // After tick DARK_VESSEL_SILENCE_AFTER the dark vessel stops emitting,
-        // so the punctuator in MaritimeTopology will flag it after 10 minutes.
-        emit(buildSpeedAnomalyVessel(t, now));
     }
 
-    // ── Vessel builders ──────────────────────────────────────────────────────
-
-    /** Steady eastbound transit; speed ~12 kn; crosses the RESTRICTED zone around tick 4–5. */
-    private VesselEvent buildNormalVessel(int t, Instant now) {
-        int wp = t % NORMAL_WAYPOINTS.length;
-        return VesselEvent.newBuilder()
-                .setMmsi(MMSI_NORMAL)
-                .setLatitude(NORMAL_WAYPOINTS[wp][0])
-                .setLongitude(NORMAL_WAYPOINTS[wp][1])
-                .setSpeed(12.0)
-                .setHeading(90.0)   // heading east
-                .setTimestamp(now)
-                .setEventType("AIS")
-                .build();
+    private VesselEvent buildEvent(SimulatedVessel vessel, int t, Instant now) {
+        return switch (vessel) {
+            case LOITERER      -> buildLoiterer(t, now);
+            case DARK_VESSEL   -> t < DARK_VESSEL_SILENCE_AFTER ? buildDarkVessel(t, now) : null;
+            case SPEED_ANOMALY -> buildSpeedAnomalyVessel(t, now);
+            default            -> buildWaypointVessel(vessel, t, now);
+        };
     }
+
+    // ── Vessel-specific builders ─────────────────────────────────────────────
 
     /**
-     * Loiterer: stays near (-89.8, 30.1) with tiny random drift and very low speed.
-     * After LOITER_DURATION_MINUTES (5 min) of consecutive sub-1-kn reports, the
-     * topology will fire the loitering detector.
+     * Loiterer: stays near the RESTRICTED zone with tiny random drift and very
+     * low speed. After 5 min of sub-1-kn reports the loitering detector fires.
      */
     private VesselEvent buildLoiterer(int t, Instant now) {
-        // Small random drift within ~0.05° so position changes slightly each tick
-        // (a completely static position would look like a spoofed/frozen feed).
         double lat = 30.1 + (Math.random() - 0.5) * 0.05;
         double lon = -89.8 + (Math.random() - 0.5) * 0.05;
-        return VesselEvent.newBuilder()
-                .setMmsi(MMSI_LOITERER)
-                .setLatitude(lat)
-                .setLongitude(lon)
-                .setSpeed(0.3)       // well below LOITER_SPEED_KN = 1.0
-                .setHeading(0.0)
-                .setTimestamp(now)
-                .setEventType("AIS")
-                .build();
+        return vesselEvent(SimulatedVessel.LOITERER.mmsi, lat, lon,
+                SimulatedVessel.LOITERER.speed, SimulatedVessel.LOITERER.heading, now);
     }
 
     /**
-     * Dark vessel: moves normally until tick DARK_VESSEL_SILENCE_AFTER, then
-     * the simulator stops emitting. The topology's wall-clock punctuator will
+     * Dark vessel: transits normally until {@code DARK_VESSEL_SILENCE_AFTER} ticks,
+     * then the simulator stops emitting. The topology's wall-clock punctuator will
      * flag it as dark after 10 minutes of silence.
      */
     private VesselEvent buildDarkVessel(int t, Instant now) {
         double lat = 30.0 + t * 0.05;
         double lon = -89.5 + t * 0.1;
-        return VesselEvent.newBuilder()
-                .setMmsi(MMSI_DARK_VESSEL)
-                .setLatitude(lat)
-                .setLongitude(lon)
-                .setSpeed(8.0)
-                .setHeading(45.0)
-                .setTimestamp(now)
-                .setEventType("AIS")
-                .build();
+        return vesselEvent(SimulatedVessel.DARK_VESSEL.mmsi, lat, lon,
+                SimulatedVessel.DARK_VESSEL.speed, SimulatedVessel.DARK_VESSEL.heading, now);
     }
 
     /**
-     * Speed-anomaly vessel: reports SOG = 2 kn but jumps ~0.4° (~24 nm) per 2-second
-     * tick, implying ~43 200 kn. The topology computes Haversine-implied speed and
-     * flags the divergence immediately on the second report.
+     * Speed-anomaly vessel: reports SOG = 2 kn but jumps ~0.4° (~24 nm) per
+     * 2-second tick. The detector computes Haversine-implied speed and flags
+     * the divergence on the second report.
      */
     private VesselEvent buildSpeedAnomalyVessel(int t, Instant now) {
-        // Large position jump each tick to create an obvious implied-speed anomaly.
         double lat = 29.5 + (t % 10) * 0.4;
         double lon = -90.0 + (t % 6) * 0.4;
+        return vesselEvent(SimulatedVessel.SPEED_ANOMALY.mmsi, lat, lon,
+                SimulatedVessel.SPEED_ANOMALY.speed, SimulatedVessel.SPEED_ANOMALY.heading, now);
+    }
+
+    /** Generic waypoint follower — loops the vessel's waypoints indefinitely. */
+    private VesselEvent buildWaypointVessel(SimulatedVessel vessel, int t, Instant now) {
+        double[] pos = vessel.positionAt(t);
+        return vesselEvent(vessel.mmsi, pos[0], pos[1], vessel.speed, vessel.heading, now);
+    }
+
+    // ── Shared factory ───────────────────────────────────────────────────────
+
+    private static VesselEvent vesselEvent(String mmsi, double lat, double lon,
+                                            double speed, double heading, Instant now) {
         return VesselEvent.newBuilder()
-                .setMmsi(MMSI_SPEED_ANOMALY)
+                .setMmsi(mmsi)
                 .setLatitude(lat)
                 .setLongitude(lon)
-                .setSpeed(2.0)       // reported SOG is suspiciously low given the jump
-                .setHeading(180.0)
+                .setSpeed(speed)
+                .setHeading(heading)
                 .setTimestamp(now)
                 .setEventType("AIS")
                 .build();
