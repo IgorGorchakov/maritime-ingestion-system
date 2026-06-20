@@ -18,8 +18,7 @@ import static org.apache.spark.sql.functions.*;
  *
  * <h3>What it does</h3>
  * Reads all Parquet files for {@code spark.job.batch-date}, groups by MMSI, and
- * writes one row per vessel per day to the {@code vessel_daily_stats} table in
- * PostGIS.
+ * writes one row per vessel per day to {@code vessel_daily_stats} in PostGIS.
  *
  * <h3>Output schema (vessel_daily_stats)</h3>
  * <pre>
@@ -36,34 +35,29 @@ import static org.apache.spark.sql.functions.*;
  * </pre>
  *
  * <h3>Lambda architecture role</h3>
- * This job is the <em>batch layer</em>: it computes exact aggregates over the
- * complete immutable cold tier, complementing the <em>speed layer</em>
- * ({@code MaritimeTopology} in {@code maritime-detection}) which produces
- * approximate near-real-time detections. The API service serving layer merges
- * both views behind one contract.
+ * This is the <em>batch layer</em>: exact aggregates over the complete immutable
+ * cold tier, complementing the <em>speed layer</em> ({@code MaritimeTopology} in
+ * {@code maritime-detection}). The API service merges both views.
  *
  * <h3>Partition pruning</h3>
- * {@code maritime-storage} writes Parquet to
- * {@code <coldTierDir>/vessel-events/date=<date>/mmsi=<mmsi>/<epochMs>.parquet}.
- * Spark's partition discovery reads the {@code date} path segment as a virtual
- * column, allowing a {@code WHERE date = ?} predicate to skip all other
- * date partitions at the filesystem level — O(1 day) not O(all time).
+ * {@code parquetInputPath()} already points at the {@code date=} partition for
+ * the batch date. The explicit {@code .filter(col("date")...)} provides a
+ * belt-and-suspenders predicate that Spark can push down to the scan level,
+ * skipping any other date partitions in the same path.
  *
  * <h3>Idempotency</h3>
- * Uses {@code SaveMode.Overwrite} with {@code truncate=true} — re-running for
- * the same date replaces the existing rows without dropping the table.
+ * {@code SaveMode.Overwrite} with {@code truncate=true} — re-running for the
+ * same date replaces rows without dropping the table.
  *
  * <h3>Spring lifecycle</h3>
- * Implements {@link ApplicationRunner}: Spring calls {@link #run} after the
- * application context is fully initialised. {@code @Order(1)} ensures this job
- * runs first when multiple {@code ApplicationRunner} beans are present.
+ * {@code @Order(1)} — runs first among the three {@link ApplicationRunner} jobs.
  */
 @Component
 @Order(1)
 public class DailyVesselAggregatesJob implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DailyVesselAggregatesJob.class);
-    static final String TARGET_TABLE = "vessel_daily_stats";
+    public static final String TARGET_TABLE = "vessel_daily_stats";
 
     private final SparkSession       spark;
     private final SparkJobProperties props;
@@ -86,8 +80,8 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
     }
 
     /**
-     * Core transformation logic — extracted so it is independently testable
-     * without an {@link ApplicationArguments} instance.
+     * Core transformation — extracted for direct testability without an
+     * {@link ApplicationArguments} instance.
      */
     public void execute() {
         Dataset<Row> raw = spark.read()
@@ -95,12 +89,7 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
                 .option("mergeSchema", "false")
                 .load(props.parquetInputPath());
 
-        log.info("Loaded {} records for date={}", raw.count(), props.getBatchDate());
-
         Dataset<Row> aggregated = raw
-                // Belt-and-suspenders date filter — parquetInputPath() already
-                // points at the date= partition, but an explicit filter here
-                // enables Spark to apply the predicate at the scan level too.
                 .filter(col("date").equalTo(props.getBatchDate()))
                 .groupBy(
                         col("vesselEvent.mmsi").alias("mmsi"),
@@ -117,7 +106,10 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
                         sum(col("speedAnomaly").cast("int")).alias("speed_anomaly_count")
                 );
 
+        // write() triggers the single Spark action for this job.
+        // No count() call before or after — count() would re-execute the full
+        // plan a second time (DataFrames are lazy), doubling execution cost.
         writer.write(aggregated, TARGET_TABLE);
-        log.info("Wrote {} vessel aggregates to {}", aggregated.count(), TARGET_TABLE);
+        log.info("DailyVesselAggregatesJob wrote to {}", TARGET_TABLE);
     }
 }

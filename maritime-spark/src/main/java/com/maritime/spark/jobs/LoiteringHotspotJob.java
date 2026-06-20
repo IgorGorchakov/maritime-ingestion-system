@@ -82,16 +82,17 @@ public class LoiteringHotspotJob implements ApplicationRunner {
                 .option("mergeSchema", "false")
                 .load(props.parquetInputPath());
 
+        // count() here is the early-exit guard — one cheap action to decide
+        // whether to proceed. Without it we'd have to attempt the full aggregation
+        // and write, then discover the table is empty after the fact.
         Dataset<Row> loitering = raw
                 .filter(col("date").equalTo(props.getBatchDate()))
                 .filter(col("loitering").equalTo(true));
 
-        long loiteringCount = loitering.count();
-        if (loiteringCount == 0) {
+        if (loitering.isEmpty()) {
             log.info("No loitering events for date={}; skipping hotspot write", props.getBatchDate());
             return;
         }
-        log.info("Processing {} loitering events", loiteringCount);
 
         // floor(x / GRID_DEG) * GRID_DEG snaps to the south-west corner of the
         // containing cell. round(…, 6) suppresses floating-point noise that would
@@ -115,7 +116,9 @@ public class LoiteringHotspotJob implements ApplicationRunner {
                 .orderBy(col("event_count").desc())
                 .limit(TOP_N);
 
+        // write() is the single Spark action for the hotspot path.
+        // No count() after write — that would re-execute the full plan a second time.
         writer.write(hotspots, TARGET_TABLE);
-        log.info("Wrote {} hotspot cells to {}", hotspots.count(), TARGET_TABLE);
+        log.info("LoiteringHotspotJob wrote to {}", TARGET_TABLE);
     }
 }

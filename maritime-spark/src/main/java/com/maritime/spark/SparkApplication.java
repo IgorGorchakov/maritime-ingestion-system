@@ -1,13 +1,12 @@
 package com.maritime.spark;
 
+import com.maritime.spark.config.SparkContextConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 
 import java.util.List;
@@ -15,20 +14,25 @@ import java.util.List;
 /**
  * Entry point for the Maritime Spark batch layer.
  *
+ * <p>This is a plain class with a single {@code main()} method — it carries no
+ * Spring annotations and is not a bean in the context it creates. The context
+ * root is {@link SparkContextConfig}, which owns {@code @ComponentScan} and
+ * {@code @PropertySource}. Separating the two prevents the entry-point class
+ * from being registered as a {@code @Configuration} bean inside its own context.
+ *
  * <h3>Why AnnotationConfigApplicationContext and not SpringApplication?</h3>
  * {@code SpringApplication} bootstraps Spring Boot's full autoconfiguration
- * machinery, which pulls in Spring Boot's managed versions of Jackson, Avro, and
- * Netty — all version-conflicting with Spark 3.x's own bundled copies. Using
- * {@link AnnotationConfigApplicationContext} directly starts only the Spring IoC
- * container (DI, {@code @Value}, {@link org.springframework.boot.ApplicationRunner})
+ * machinery, pulling in Boot-managed versions of Jackson, Avro, and Netty —
+ * all version-conflicting with Spark 3.x's own bundled copies.
+ * {@link AnnotationConfigApplicationContext} starts only the Spring IoC container
  * with zero autoconfiguration, keeping Spark's classpath isolated.
  *
  * <h3>Job execution order</h3>
- * All {@link org.springframework.boot.ApplicationRunner} beans are collected and
- * sorted by {@link AnnotationAwareOrderComparator}, which respects both
- * {@link org.springframework.core.annotation.Order @Order} annotations and
- * {@link org.springframework.core.Ordered} implementations — exactly what
- * {@code SpringApplication} uses internally. The three jobs are ordered:
+ * {@link ApplicationRunner} beans are sorted by
+ * {@link AnnotationAwareOrderComparator} — the same comparator
+ * {@code SpringApplication} uses internally — which respects
+ * {@link org.springframework.core.annotation.Order @Order},
+ * {@link org.springframework.core.Ordered}, and {@link org.springframework.core.PriorityOrdered}:
  * <ol>
  *   <li>{@code DailyVesselAggregatesJob} — {@code @Order(1)}</li>
  *   <li>{@code RiskRollupJob}            — {@code @Order(2)}</li>
@@ -48,9 +52,6 @@ import java.util.List;
  * mvn exec:java -Plocal -Dexec.mainClass=com.maritime.spark.SparkApplication
  * }</pre>
  */
-@Configuration
-@ComponentScan("com.maritime.spark")
-@PropertySource("classpath:application.properties")
 public class SparkApplication {
 
     private static final Logger log = LoggerFactory.getLogger(SparkApplication.class);
@@ -59,24 +60,18 @@ public class SparkApplication {
         log.info("Maritime Spark Application starting");
 
         try (AnnotationConfigApplicationContext ctx =
-                     new AnnotationConfigApplicationContext(SparkApplication.class)) {
+                     new AnnotationConfigApplicationContext(SparkContextConfig.class)) {
 
             ApplicationArguments appArgs = new DefaultApplicationArguments(args);
 
-            // Collect all ApplicationRunner beans and sort by @Order using Spring's
-            // AnnotationAwareOrderComparator — the same comparator SpringApplication
-            // uses. This correctly resolves @Order, Ordered, and PriorityOrdered,
-            // whereas the previous manual AnnotationUtils sort operated on the
-            // unsorted entrySet() stream and produced alphabetical-by-bean-name
-            // order rather than the intended @Order sequence.
-            List<org.springframework.boot.ApplicationRunner> runners =
-                    ctx.getBeansOfType(org.springframework.boot.ApplicationRunner.class)
+            List<ApplicationRunner> runners =
+                    ctx.getBeansOfType(ApplicationRunner.class)
                        .values()
                        .stream()
                        .sorted(AnnotationAwareOrderComparator.INSTANCE)
                        .toList();
 
-            for (org.springframework.boot.ApplicationRunner runner : runners) {
+            for (ApplicationRunner runner : runners) {
                 String name = runner.getClass().getSimpleName();
                 try {
                     log.info("Running job: {}", name);
