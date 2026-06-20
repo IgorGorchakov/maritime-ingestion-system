@@ -72,3 +72,14 @@ services:
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  maritime-frontend:
+    build:
+      context: ./maritime-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    # The Spring Boot services run on the host (not in Docker), so nginx proxies
+    # reach them via host.docker.internal — same pattern as Prometheus above.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
