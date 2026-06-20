@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS loitering_hotspots (
 
 -- Spatial index on the grid cell centre for PostGIS proximity queries.
 -- Phase 8 MCP tool (list_loitering_hotspots) will use ST_DWithin against this.
+-- Note: ST_MakePoint returns geometry directly; no cast needed.
 CREATE INDEX IF NOT EXISTS loitering_hotspots_geom_idx
     ON loitering_hotspots
-    USING GIST (ST_MakePoint(cell_lon, cell_lat)::geometry);
+    USING GIST (ST_MakePoint(cell_lon, cell_lat));
