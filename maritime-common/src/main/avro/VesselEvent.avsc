@@ -22,6 +22,12 @@
       "name": "eventType",
       "type": { "type": "string", "avro.java.string": "String" },
       "doc": "Source/kind of report, e.g. AIS, SATELLITE."
+    },
+    {
+      "name": "sourceType",
+      "type": ["null", { "type": "string", "avro.java.string": "String" }],
+      "default": null,
+      "doc": "AIS reception channel: TERRESTRIAL (land/port VHF), SATELLITE, or VESSEL (AIS-to-AIS relay). Null for legacy records."
     }
   ]
 }

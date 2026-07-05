@@ -27,8 +27,9 @@ import java.util.Map;
  * Kafka consumer configuration for the enricher service.
  *
  * <p>Configures one listener container factory used by
- * {@link com.maritime.enricher.service.RiskScorerEnrichService} for the
- * {@code maritime.ais.raw} topic. The factory sets:
+ * {@link com.maritime.enricher.service.RiskScorerEnrichService} for the three raw
+ * source topics ({@code maritime.ais.raw.terrestrial}, {@code .satellite},
+ * {@code .vessel}). The factory sets:
  * <ul>
  *   <li>{@code MANUAL_IMMEDIATE} ack mode — offsets are committed only after the
  *       listener returns successfully, giving at-least-once semantics.</li>

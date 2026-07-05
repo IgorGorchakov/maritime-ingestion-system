@@ -1,7 +1,6 @@
 package com.maritime.ingestion.controller;
 
 import com.maritime.common.dto.VesselEvent;
-import com.maritime.common.kafka.Topics;
 import com.maritime.common.observability.CorrelationIds;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -83,7 +82,7 @@ public class AisSimulatorController {
 
         for (SimulatedVessel vessel : SimulatedVessel.values()) {
             VesselEvent event = buildEvent(vessel, t, now);
-            if (event != null) emit(event);
+            if (event != null) emit(vessel, event);
         }
     }
 
@@ -109,7 +108,7 @@ public class AisSimulatorController {
         double lon = -89.80 + Math.cos(angle) * 0.02;
         // Heading tangent to the circle
         double heading = (Math.toDegrees(angle + Math.PI / 2) + 360) % 360;
-        return vesselEvent(SimulatedVessel.LOITERER.mmsi, lat, lon,
+        return vesselEvent(SimulatedVessel.LOITERER, lat, lon,
                 SimulatedVessel.LOITERER.speed, heading, now);
     }
 
@@ -120,7 +119,7 @@ public class AisSimulatorController {
     private VesselEvent buildDarkVessel(int t, Instant now) {
         double lat = 30.0 + t * 0.01;
         double lon = -89.5 + t * 0.02;
-        return vesselEvent(SimulatedVessel.DARK_VESSEL.mmsi, lat, lon,
+        return vesselEvent(SimulatedVessel.DARK_VESSEL, lat, lon,
                 SimulatedVessel.DARK_VESSEL.speed, 45.0, now);
     }
 
@@ -132,7 +131,7 @@ public class AisSimulatorController {
     private VesselEvent buildSpeedAnomalyVessel(int t, Instant now) {
         double lat = 29.5 + (t % 10) * 0.4;
         double lon = -90.0 + (t % 6) * 0.4;
-        return vesselEvent(SimulatedVessel.SPEED_ANOMALY.mmsi, lat, lon,
+        return vesselEvent(SimulatedVessel.SPEED_ANOMALY, lat, lon,
                 SimulatedVessel.SPEED_ANOMALY.speed, 180.0, now);
     }
 
@@ -140,31 +139,32 @@ public class AisSimulatorController {
     private VesselEvent buildWaypointVessel(SimulatedVessel vessel, int t, Instant now) {
         double[] pos     = vessel.positionAt(t);
         double   heading = vessel.headingAt(t);
-        return vesselEvent(vessel.mmsi, pos[0], pos[1], vessel.speed, heading, now);
+        return vesselEvent(vessel, pos[0], pos[1], vessel.speed, heading, now);
     }
 
     // ── Shared factory ───────────────────────────────────────────────────────
 
-    private static VesselEvent vesselEvent(String mmsi, double lat, double lon,
+    private static VesselEvent vesselEvent(SimulatedVessel vessel, double lat, double lon,
                                             double speed, double heading, Instant now) {
         return VesselEvent.newBuilder()
-                .setMmsi(mmsi)
+                .setMmsi(vessel.mmsi)
                 .setLatitude(lat)
                 .setLongitude(lon)
                 .setSpeed(speed)
                 .setHeading(heading)
                 .setTimestamp(now)
                 .setEventType("AIS")
+                .setSourceType(vessel.aisSource.name())
                 .build();
     }
 
     // ── Kafka publish ────────────────────────────────────────────────────────
 
-    private void emit(VesselEvent event) {
+    private void emit(SimulatedVessel vessel, VesselEvent event) {
         String correlationId = CorrelationIds.newId();
         MDC.put(CorrelationIds.MDC_KEY, correlationId);
         try {
-            kafkaTemplate.send(Topics.AIS_RAW, event.getMmsi(), event).whenComplete((result, ex) -> {
+            kafkaTemplate.send(vessel.aisSource.topic, event.getMmsi(), event).whenComplete((result, ex) -> {
                 MDC.put(CorrelationIds.MDC_KEY, correlationId);
                 try {
                     if (ex == null) {

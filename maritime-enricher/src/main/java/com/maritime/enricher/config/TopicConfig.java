@@ -22,8 +22,18 @@ public class TopicConfig {
     private static final int PARTITIONS = 3;
 
     @Bean
-    public NewTopic maritimeAisRaw() {
-        return TopicBuilder.name(Topics.AIS_RAW).partitions(PARTITIONS).replicas(-1).build();
+    public NewTopic maritimeAisRawTerrestrial() {
+        return TopicBuilder.name(Topics.AIS_RAW_TERRESTRIAL).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    @Bean
+    public NewTopic maritimeAisRawSatellite() {
+        return TopicBuilder.name(Topics.AIS_RAW_SATELLITE).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    @Bean
+    public NewTopic maritimeAisRawVessel() {
+        return TopicBuilder.name(Topics.AIS_RAW_VESSEL).partitions(PARTITIONS).replicas(-1).build();
     }
 
     @Bean
@@ -32,8 +42,18 @@ public class TopicConfig {
     }
 
     @Bean
-    public NewTopic maritimeAisRawDlt() {
-        return TopicBuilder.name(Topics.AIS_RAW_DLT).partitions(PARTITIONS).replicas(-1).build();
+    public NewTopic maritimeAisRawTerrestrialDlt() {
+        return TopicBuilder.name(Topics.AIS_RAW_TERRESTRIAL_DLT).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    @Bean
+    public NewTopic maritimeAisRawSatelliteDlt() {
+        return TopicBuilder.name(Topics.AIS_RAW_SATELLITE_DLT).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    @Bean
+    public NewTopic maritimeAisRawVesselDlt() {
+        return TopicBuilder.name(Topics.AIS_RAW_VESSEL_DLT).partitions(PARTITIONS).replicas(-1).build();
     }
 
     @Bean

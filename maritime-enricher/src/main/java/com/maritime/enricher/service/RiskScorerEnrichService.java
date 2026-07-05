@@ -29,8 +29,11 @@ import java.util.List;
  *
  * <h3>ETL stages</h3>
  * <ol>
- *   <li><b>Extract</b> — event arrives from {@code maritime.ais.raw} via
- *       {@code @KafkaListener} (consumer group {@code enricher-service}).</li>
+ *   <li><b>Extract</b> — event arrives from one of three raw source topics
+ *       ({@code maritime.ais.raw.terrestrial}, {@code maritime.ais.raw.satellite},
+ *       {@code maritime.ais.raw.vessel}) via a single {@code @KafkaListener} in the
+ *       {@code enricher-service} consumer group. All three sources feed the same
+ *       ETL pipeline and merge into {@code maritime.enriched}.</li>
  *   <li><b>Validate</b> — {@link VesselEventValidator} checks MMSI format,
  *       lat/lon bounds, null-island, timestamp freshness, and speed ceiling.
  *       Invalid events are routed to {@code maritime.ais.quarantine}.</li>
@@ -97,7 +100,11 @@ public class RiskScorerEnrichService {
                 .register(meterRegistry);
     }
 
-    @KafkaListener(topics = Topics.AIS_RAW, groupId = "enricher-service")
+    @KafkaListener(topics = {
+            Topics.AIS_RAW_TERRESTRIAL,
+            Topics.AIS_RAW_SATELLITE,
+            Topics.AIS_RAW_VESSEL
+    }, groupId = "enricher-service")
     public void consumeAndScore(VesselEvent event, Acknowledgment ack) {
         Timer.Sample timer = Timer.start(meterRegistry);
         log.info("Received event for MMSI: {}", event.getMmsi());

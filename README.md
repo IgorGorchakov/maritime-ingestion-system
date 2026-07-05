@@ -45,7 +45,7 @@ The project is a Maven multi-module build with **seven modules** — five runnab
 The single dependency every module pulls in. Holds the **Avro-generated DTOs** (`VesselEvent`, `EnrichedVesselEvent`) so all services share one schema; **`Topics` constants** (single source of truth for every Kafka topic name); **validation** (`VesselEventValidator`); **geospatial math** (`GeoUtils` — Haversine + JTS point-in-polygon); and **observability plumbing** (`CorrelationIds`, HTTP filter / Kafka interceptors). Has no `main` — it is a JAR, not a service.
 
 ### `maritime-ingestion` (8081) — event source
-The start of the pipeline. The vessel fleet is defined entirely in `SimulatedVessel`, an enum where each constant holds the vessel's MMSI, display label, speed, and waypoint track. `AisSimulatorController` iterates `SimulatedVessel.values()` every 2 seconds — adding a vessel requires only a new enum constant.
+The start of the pipeline. The vessel fleet is defined entirely in `SimulatedVessel`, an enum where each constant holds the vessel's MMSI, display label, speed, waypoint track, and **AIS source type** (`TERRESTRIAL`, `SATELLITE`, or `VESSEL`). `AisSimulatorController` iterates `SimulatedVessel.values()` every 2 seconds and routes each vessel's events to the corresponding raw topic (`maritime.ais.raw.terrestrial`, `.satellite`, or `.vessel`) based on its `AisSource`. Adding a vessel requires only a new enum constant.
 
 **Fleet (9 vessels):**
 
@@ -64,7 +64,7 @@ The start of the pipeline. The vessel fleet is defined entirely in `SimulatedVes
 Waypoint vessels are linearly interpolated between waypoints over `ticksPerWaypoint` ticks, producing smooth continuous movement. Heading is computed as the true bearing to the next waypoint, so markers rotate naturally on turns. Exposes `POST /api/v1/simulate/start|stop`.
 
 ### `maritime-enricher` (8082) — stateless ETL
-Purely stateless — no Kafka Streams, no RocksDB. `RiskScorerEnrichService` (`@KafkaListener` + `KafkaTemplate`) runs the full ETL pipeline: validate → dedup → PostGIS zone enrichment → risk score → publish to `maritime.enriched`. Bad/duplicate events go to `maritime.ais.quarantine` with a `reason` header. Also owns the shared database's Flyway migrations (zones catalog + Spark output tables). Uses `spring.flyway.baseline-on-migrate=true` so it can run against a database that was pre-seeded without Flyway.
+Purely stateless — no Kafka Streams, no RocksDB. `RiskScorerEnrichService` (`@KafkaListener` + `KafkaTemplate`) consumes all three raw source topics (`maritime.ais.raw.terrestrial`, `.satellite`, `.vessel`) under a single consumer group and merges them into a unified ETL pipeline: validate → dedup → PostGIS zone enrichment → risk score → publish to `maritime.enriched`. Bad/duplicate events go to `maritime.ais.quarantine` with a `reason` header. Also owns the shared database's Flyway migrations (zones catalog + Spark output tables). Uses `spring.flyway.baseline-on-migrate=true` so it can run against a database that was pre-seeded without Flyway.
 
 ### `maritime-detection` (8086) — stateful detection
 The Kafka Streams service. `MaritimeTopology` consumes `maritime.enriched` under the dedicated consumer group `maritime-detection-topology` and maintains per-MMSI state in a RocksDB-backed store, fault-tolerant via its changelog topic. `VesselDetectionProcessor` runs three detectors:
@@ -128,13 +128,13 @@ The `host.docker.internal` pattern (with `extra_hosts: host.docker.internal:host
 ## Implemented Features
 
 ### Ingestion & simulation
--   **AIS simulator** (`AisSimulatorController` + `SimulatedVessel`) drives a nine-vessel demo fleet on a 2-second scheduler. Five vessels are active transits; four exercise specific detectors (loiterer, dark vessel, speed anomaly, normal baseline). Vessel definitions live in `SimulatedVessel` — adding a vessel is one enum constant.
+-   **AIS simulator** (`AisSimulatorController` + `SimulatedVessel`) drives a nine-vessel demo fleet on a 2-second scheduler. Each vessel carries an `AisSource` (`TERRESTRIAL`, `SATELLITE`, or `VESSEL`) that determines its raw ingestion topic. The `sourceType` field is stamped on every `VesselEvent` and flows through the full pipeline. Vessel definitions live in `SimulatedVessel` — adding a vessel is one enum constant.
 -   Waypoint vessels are smoothly interpolated between positions; heading is the true bearing to the next waypoint.
 -   Loiterer uses a deterministic sin/cos circular drift — visually smooth and reproducible, unlike `Math.random()`.
 -   Start/stop via `POST /api/v1/simulate/start` and `/stop`.
 
 ### Enrichment & risk scoring (`maritime-enricher`)
--   **ETL pipeline** (`RiskScorerEnrichService`): Validate → Dedup → Enrich → Score, consuming `maritime.ais.raw` and producing `maritime.enriched`.
+-   **ETL pipeline** (`RiskScorerEnrichService`): Validate → Dedup → Enrich → Score, consuming all three raw source topics (`maritime.ais.raw.terrestrial`, `.satellite`, `.vessel`) and producing `maritime.enriched`.
 -   **Validation** (`VesselEventValidator`): MMSI format (9 digits), lat/lon bounds, null-island `(0,0)` rejection, timestamp staleness, and a speed ceiling. Bad records are routed to `maritime.ais.quarantine` with a reason header.
 -   **Deduplication** (`DedupService`): Caffeine-backed, keyed on `(mmsi, timestamp)` with TTL expiry — the consumer-side idempotency that at-least-once delivery requires.
 -   **Geospatial enrichment** (`ZoneRepository`): PostGIS `ST_Contains` lookup against a zones catalog (RESTRICTED / PORT / EEZ) with a GiST index.
@@ -192,11 +192,13 @@ A single AIS report travels through five services and up to four Kafka topics. E
 
 | Topic | Produced by | Consumed by (group) | Payload |
 |---|---|---|---|
-| `maritime.ais.raw` | Ingestion (`AisSimulatorController`) | Enricher `RiskScorerEnrichService` (`enricher-service`) | `VesselEvent` |
+| `maritime.ais.raw.terrestrial` | Ingestion (`AisSimulatorController`) — land/port VHF vessels | Enricher `RiskScorerEnrichService` (`enricher-service`) | `VesselEvent` (`sourceType=TERRESTRIAL`) |
+| `maritime.ais.raw.satellite` | Ingestion (`AisSimulatorController`) — satellite-tracked vessels | Enricher `RiskScorerEnrichService` (`enricher-service`) | `VesselEvent` (`sourceType=SATELLITE`) |
+| `maritime.ais.raw.vessel` | Ingestion (`AisSimulatorController`) — vessel-to-vessel relay | Enricher `RiskScorerEnrichService` (`enricher-service`) | `VesselEvent` (`sourceType=VESSEL`) |
 | `maritime.enriched` | Enricher `RiskScorerEnrichService` | Detection `MaritimeTopology` (`maritime-detection-topology`) **and** Storage `VesselController` (`storage-service`) | `EnrichedVesselEvent` |
 | `maritime.detections` | Detection `MaritimeTopology` | Storage `VesselController` (`storage-service`) | `EnrichedVesselEvent` (≥1 flag set) |
 | `maritime.ais.quarantine` | Enricher `RiskScorerEnrichService` | (audit sink) | `VesselEvent` + `reason` header |
-| `maritime.ais.raw.DLT` / `maritime.enriched.DLT` | `DefaultErrorHandler` after retries exhausted | (dead-letter sink) | original record |
+| `maritime.ais.raw.*.DLT` / `maritime.enriched.DLT` | `DefaultErrorHandler` after retries exhausted | (dead-letter sink) | original record |
 
 > **Two independent consumers of `maritime.enriched`.** The detection service and the storage service each subscribe to `maritime.enriched` under their own consumer groups and receive the full stream independently. The detection topology re-publishes only *flagged* events to the separate `maritime.detections` topic — it never writes back to `maritime.enriched`, which keeps the flow a strict DAG (no feedback loop).
 
@@ -205,7 +207,7 @@ A single AIS report travels through five services and up to four Kafka topics. E
 ```mermaid
 sequenceDiagram
     participant SIM as Ingestion<br/>(AIS Simulator)
-    participant RAW as maritime.ais.raw
+    participant RAW as maritime.ais.raw.*<br/>(terrestrial/satellite/vessel)
     participant RSS as Enricher<br/>(RiskScorerEnrichService)
     participant Q as maritime.ais.quarantine
     participant ENR as maritime.enriched
@@ -215,7 +217,7 @@ sequenceDiagram
     participant DB as Postgres hot tier<br/>+ JSON cold tier
     participant GW as API service
 
-    SIM->>RAW: produce VesselEvent (key=mmsi)
+    SIM->>RAW: produce VesselEvent (key=mmsi, routed by AisSource)
     RAW->>RSS: consume (group: enricher-service)
     Note over RSS: Validate → Dedup → Enrich (PostGIS zone, risk score)
     alt invalid or duplicate
@@ -238,7 +240,7 @@ sequenceDiagram
 
 ### Step by step
 
-1. **Ingest** — the simulator emits a `VesselEvent` to `maritime.ais.raw`, keyed by MMSI, stamping a correlation ID into the MDC and Kafka headers.
+1. **Ingest** — the simulator emits a `VesselEvent` keyed by MMSI, routed to one of three raw topics based on each vessel's `AisSource` (`maritime.ais.raw.terrestrial`, `.satellite`, or `.vessel`). The `sourceType` field on the event carries the origin through the full pipeline. A correlation ID is stamped into the MDC and Kafka headers.
 2. **Validate & dedup** — `RiskScorerEnrichService` (`enricher-service` group) validates the event and checks the Caffeine dedup cache. Invalid or duplicate events go to `maritime.ais.quarantine`; the offset is acked only after the quarantine send confirms.
 3. **Enrich & score** — valid events get a PostGIS zone lookup and a risk score, are wrapped as an `EnrichedVesselEvent` (detection flags default `false`), and published to `maritime.enriched`. Offset acked only after the produce callback succeeds.
 4. **Detect (speed layer)** — `MaritimeTopology` in `maritime-detection` (`maritime-detection-topology` group) consumes `maritime.enriched`, updates per-MMSI RocksDB state, and runs the loitering / speed-anomaly / dark-vessel detectors. Events where a flag fires are re-published to `maritime.detections`; clean events produce no output.

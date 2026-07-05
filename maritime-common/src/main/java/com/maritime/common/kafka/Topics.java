@@ -26,8 +26,14 @@ public final class Topics {
     /** Suffix appended to a topic to form its dead-letter topic. */
     public static final String DLT_SUFFIX = ".DLT";
 
-    /** Raw AIS reports produced by the ingestion service. */
-    public static final String AIS_RAW = "maritime.ais.raw";
+    /** Raw AIS reports received by land/port-based VHF stations. */
+    public static final String AIS_RAW_TERRESTRIAL = "maritime.ais.raw.terrestrial";
+
+    /** Raw AIS reports received by satellite. */
+    public static final String AIS_RAW_SATELLITE   = "maritime.ais.raw.satellite";
+
+    /** Raw AIS reports relayed vessel-to-vessel (AIS-to-AIS). */
+    public static final String AIS_RAW_VESSEL      = "maritime.ais.raw.vessel";
 
     /** Enriched events (zone + risk) produced by the streaming ETL. */
     public static final String ENRICHED = "maritime.enriched";
@@ -38,8 +44,10 @@ public final class Topics {
     /** Invalid or duplicate events routed aside for audit. */
     public static final String QUARANTINE = "maritime.ais.quarantine";
 
-    /** Dead-letter topic for poison records on {@link #AIS_RAW}. */
-    public static final String AIS_RAW_DLT = AIS_RAW + DLT_SUFFIX;
+    /** Dead-letter topics for poison records on each raw source topic. */
+    public static final String AIS_RAW_TERRESTRIAL_DLT = AIS_RAW_TERRESTRIAL + DLT_SUFFIX;
+    public static final String AIS_RAW_SATELLITE_DLT   = AIS_RAW_SATELLITE   + DLT_SUFFIX;
+    public static final String AIS_RAW_VESSEL_DLT      = AIS_RAW_VESSEL      + DLT_SUFFIX;
 
     /** Dead-letter topic for poison records on {@link #ENRICHED}. */
     public static final String ENRICHED_DLT = ENRICHED + DLT_SUFFIX;

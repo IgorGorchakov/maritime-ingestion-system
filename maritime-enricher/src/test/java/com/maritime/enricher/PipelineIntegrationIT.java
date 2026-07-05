@@ -128,7 +128,7 @@ class PipelineIntegrationIT {
     @Order(1)
     void validEvent_appearsOnEnrichedTopic() {
         VesselEvent event = validVessel("123456789");
-        producer.send(new ProducerRecord<>(Topics.AIS_RAW, event.getMmsi(), event));
+        producer.send(new ProducerRecord<>(Topics.AIS_RAW_TERRESTRIAL, event.getMmsi(), event));
         producer.flush();
 
         await().atMost(Duration.ofSeconds(30))
@@ -150,7 +150,7 @@ class PipelineIntegrationIT {
                 .setSpeed(10.0).setHeading(90.0)
                 .setTimestamp(Instant.now()).setEventType("AIS")
                 .build();
-        producer.send(new ProducerRecord<>(Topics.AIS_RAW, "INVALID", bad));
+        producer.send(new ProducerRecord<>(Topics.AIS_RAW_TERRESTRIAL, "INVALID", bad));
         producer.flush();
 
         await().atMost(Duration.ofSeconds(30))
@@ -174,7 +174,7 @@ class PipelineIntegrationIT {
                 .setSpeed(0.0).setHeading(0.0)
                 .setTimestamp(Instant.now()).setEventType("AIS")
                 .build();
-        producer.send(new ProducerRecord<>(Topics.AIS_RAW, nullIsland.getMmsi(), nullIsland));
+        producer.send(new ProducerRecord<>(Topics.AIS_RAW_TERRESTRIAL, nullIsland.getMmsi(), nullIsland));
         producer.flush();
 
         await().atMost(Duration.ofSeconds(30))
@@ -188,7 +188,7 @@ class PipelineIntegrationIT {
         // Send the same (mmsi, timestamp) twice — second should be quarantined as duplicate.
         VesselEvent event = validVessel("555444333");
         ProducerRecord<String, VesselEvent> record =
-                new ProducerRecord<>(Topics.AIS_RAW, event.getMmsi(), event);
+                new ProducerRecord<>(Topics.AIS_RAW_TERRESTRIAL, event.getMmsi(), event);
         producer.send(record);
         producer.send(record);  // exact duplicate
         producer.flush();
