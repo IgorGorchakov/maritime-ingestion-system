@@ -64,7 +64,7 @@ The start of the pipeline. The vessel fleet is defined entirely in `SimulatedVes
 Waypoint vessels are linearly interpolated between waypoints over `ticksPerWaypoint` ticks, producing smooth continuous movement. Heading is computed as the true bearing to the next waypoint, so markers rotate naturally on turns. Exposes `POST /api/v1/simulate/start|stop`.
 
 ### `maritime-enricher` (8082) — stateless ETL
-Purely stateless — no Kafka Streams, no RocksDB. `RiskScorerService` (`@KafkaListener` + `KafkaTemplate`) runs the full ETL pipeline: validate → dedup → PostGIS zone enrichment → risk score → publish to `maritime.enriched`. Bad/duplicate events go to `maritime.ais.quarantine` with a `reason` header. Also owns the shared database's Flyway migrations (zones catalog + Spark output tables). Uses `spring.flyway.baseline-on-migrate=true` so it can run against a database that was pre-seeded without Flyway.
+Purely stateless — no Kafka Streams, no RocksDB. `RiskScorerEnrichService` (`@KafkaListener` + `KafkaTemplate`) runs the full ETL pipeline: validate → dedup → PostGIS zone enrichment → risk score → publish to `maritime.enriched`. Bad/duplicate events go to `maritime.ais.quarantine` with a `reason` header. Also owns the shared database's Flyway migrations (zones catalog + Spark output tables). Uses `spring.flyway.baseline-on-migrate=true` so it can run against a database that was pre-seeded without Flyway.
 
 ### `maritime-detection` (8086) — stateful detection
 The Kafka Streams service. `MaritimeTopology` consumes `maritime.enriched` under the dedicated consumer group `maritime-detection-topology` and maintains per-MMSI state in a RocksDB-backed store, fault-tolerant via its changelog topic. `VesselDetectionProcessor` runs three detectors:
@@ -134,7 +134,7 @@ The `host.docker.internal` pattern (with `extra_hosts: host.docker.internal:host
 -   Start/stop via `POST /api/v1/simulate/start` and `/stop`.
 
 ### Enrichment & risk scoring (`maritime-enricher`)
--   **ETL pipeline** (`RiskScorerService`): Validate → Dedup → Enrich → Score, consuming `maritime.ais.raw` and producing `maritime.enriched`.
+-   **ETL pipeline** (`RiskScorerEnrichService`): Validate → Dedup → Enrich → Score, consuming `maritime.ais.raw` and producing `maritime.enriched`.
 -   **Validation** (`VesselEventValidator`): MMSI format (9 digits), lat/lon bounds, null-island `(0,0)` rejection, timestamp staleness, and a speed ceiling. Bad records are routed to `maritime.ais.quarantine` with a reason header.
 -   **Deduplication** (`DedupService`): Caffeine-backed, keyed on `(mmsi, timestamp)` with TTL expiry — the consumer-side idempotency that at-least-once delivery requires.
 -   **Geospatial enrichment** (`ZoneRepository`): PostGIS `ST_Contains` lookup against a zones catalog (RESTRICTED / PORT / EEZ) with a GiST index.
@@ -192,10 +192,10 @@ A single AIS report travels through five services and up to four Kafka topics. E
 
 | Topic | Produced by | Consumed by (group) | Payload |
 |---|---|---|---|
-| `maritime.ais.raw` | Ingestion (`AisSimulatorController`) | Enricher `RiskScorerService` (`enricher-service`) | `VesselEvent` |
-| `maritime.enriched` | Enricher `RiskScorerService` | Detection `MaritimeTopology` (`maritime-detection-topology`) **and** Storage `VesselController` (`storage-service`) | `EnrichedVesselEvent` |
+| `maritime.ais.raw` | Ingestion (`AisSimulatorController`) | Enricher `RiskScorerEnrichService` (`enricher-service`) | `VesselEvent` |
+| `maritime.enriched` | Enricher `RiskScorerEnrichService` | Detection `MaritimeTopology` (`maritime-detection-topology`) **and** Storage `VesselController` (`storage-service`) | `EnrichedVesselEvent` |
 | `maritime.detections` | Detection `MaritimeTopology` | Storage `VesselController` (`storage-service`) | `EnrichedVesselEvent` (≥1 flag set) |
-| `maritime.ais.quarantine` | Enricher `RiskScorerService` | (audit sink) | `VesselEvent` + `reason` header |
+| `maritime.ais.quarantine` | Enricher `RiskScorerEnrichService` | (audit sink) | `VesselEvent` + `reason` header |
 | `maritime.ais.raw.DLT` / `maritime.enriched.DLT` | `DefaultErrorHandler` after retries exhausted | (dead-letter sink) | original record |
 
 > **Two independent consumers of `maritime.enriched`.** The detection service and the storage service each subscribe to `maritime.enriched` under their own consumer groups and receive the full stream independently. The detection topology re-publishes only *flagged* events to the separate `maritime.detections` topic — it never writes back to `maritime.enriched`, which keeps the flow a strict DAG (no feedback loop).
@@ -206,7 +206,7 @@ A single AIS report travels through five services and up to four Kafka topics. E
 sequenceDiagram
     participant SIM as Ingestion<br/>(AIS Simulator)
     participant RAW as maritime.ais.raw
-    participant RSS as Enricher<br/>(RiskScorerService)
+    participant RSS as Enricher<br/>(RiskScorerEnrichService)
     participant Q as maritime.ais.quarantine
     participant ENR as maritime.enriched
     participant TOP as Detection<br/>(MaritimeTopology)
@@ -239,7 +239,7 @@ sequenceDiagram
 ### Step by step
 
 1. **Ingest** — the simulator emits a `VesselEvent` to `maritime.ais.raw`, keyed by MMSI, stamping a correlation ID into the MDC and Kafka headers.
-2. **Validate & dedup** — `RiskScorerService` (`enricher-service` group) validates the event and checks the Caffeine dedup cache. Invalid or duplicate events go to `maritime.ais.quarantine`; the offset is acked only after the quarantine send confirms.
+2. **Validate & dedup** — `RiskScorerEnrichService` (`enricher-service` group) validates the event and checks the Caffeine dedup cache. Invalid or duplicate events go to `maritime.ais.quarantine`; the offset is acked only after the quarantine send confirms.
 3. **Enrich & score** — valid events get a PostGIS zone lookup and a risk score, are wrapped as an `EnrichedVesselEvent` (detection flags default `false`), and published to `maritime.enriched`. Offset acked only after the produce callback succeeds.
 4. **Detect (speed layer)** — `MaritimeTopology` in `maritime-detection` (`maritime-detection-topology` group) consumes `maritime.enriched`, updates per-MMSI RocksDB state, and runs the loitering / speed-anomaly / dark-vessel detectors. Events where a flag fires are re-published to `maritime.detections`; clean events produce no output.
 5. **Persist** — `VesselController` (`storage-service` group) subscribes to **both** `maritime.enriched` and `maritime.detections`. Each event is written to the JSON cold tier and upserted into the Postgres hot tier, then acked.
@@ -407,7 +407,7 @@ And the module boundary follows directly from that:
 | Example work | Validate, dedup, enrich, score | Loitering, speed-anomaly, dark-vessel detection |
 | Deployment concern | Stateless — scale freely | Stateful — partition assignment must be respected |
 
-**Why `RiskScorerService` stays plain and in `maritime-enricher`.** Validation, zone enrichment, and scoring depend only on the event in hand. A plain consumer/producer is the simpler, lighter tool — no state stores, no topology, less to reason about. Kafka Streams here would add complexity that buys nothing.
+**Why `RiskScorerEnrichService` stays plain and in `maritime-enricher`.** Validation, zone enrichment, and scoring depend only on the event in hand. A plain consumer/producer is the simpler, lighter tool — no state stores, no topology, less to reason about. Kafka Streams here would add complexity that buys nothing.
 
 **Why `MaritimeTopology` needs Streams and its own module.** Detecting that a vessel is *loitering* or *dark* requires comparing the current report against its past. Streams provides, out of the box, what you'd otherwise hand-build on top of a plain consumer:
 
@@ -416,4 +416,4 @@ And the module boundary follows directly from that:
 3.  **Time and the punctuator.** The dark-vessel detector fires when events *stop* arriving. Streams' wall-clock `context.schedule(...)` punctuator scans the store on a timer; plain Kafka would need a separately managed scheduler coordinated with an external store.
 4.  **Rebalance & fault tolerance.** When an instance dies, Streams migrates the affected state (restored from the changelog) to the new owner. Doing this safely by hand is genuinely hard.
 
-**The cost (why not Streams everywhere).** Kafka Streams pins you to the JVM, adds RocksDB on local disk plus internal changelog/repartition topics, and makes the app stateful — deployment and scaling must respect partition assignment. For a stateless step like `RiskScorerService`, that overhead is pure cost with no benefit. Separating the modules makes that cost boundary explicit and enforced at compile time.
+**The cost (why not Streams everywhere).** Kafka Streams pins you to the JVM, adds RocksDB on local disk plus internal changelog/repartition topics, and makes the app stateful — deployment and scaling must respect partition assignment. For a stateless step like `RiskScorerEnrichService`, that overhead is pure cost with no benefit. Separating the modules makes that cost boundary explicit and enforced at compile time.

@@ -1,6 +1,7 @@
 package com.maritime.detection.streams;
 
 import com.maritime.common.dto.EnrichedVesselEvent;
+import com.maritime.common.dto.VesselEvent;
 import com.maritime.common.geo.GeoUtils;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -162,6 +163,7 @@ public class VesselDetectionProcessor
                     meterRegistry.counter("detections", "type", "dark_vessel").increment();
                     log.warn("Dark vessel detected mmsi={} lastSeen={}", state.getMmsi(),
                             Instant.ofEpochMilli(state.getLastSeenMs()));
+                    ctx.forward(new Record<>(entry.key, toEnrichedEvent(state, true), wallClockMs));
                 } else if (!isDark && wasDark) {
                     state.setDarkVessel(false);
                     store.put(entry.key, state);
@@ -182,7 +184,39 @@ public class VesselDetectionProcessor
                 event.getVesselEvent().getTimestamp().toEpochMilli());
         s.setLoitering(loitering);
         s.setSpeedAnomaly(speedAnomaly);
+        // Carry enrichment context so the dark-vessel punctuator can rebuild the event.
+        s.setInRestrictedZone(event.getInRestrictedZone());
+        s.setZoneName(event.getZoneName());
+        s.setZoneType(event.getZoneType());
+        s.setDistanceToPort(event.getDistanceToPort());
+        s.setRiskScore(event.getRiskScore());
+        s.setRiskLevel(event.getRiskLevel());
         return s;
+    }
+
+    /** Rebuilds an {@code EnrichedVesselEvent} from retained state, with {@code darkVessel} set. */
+    private static EnrichedVesselEvent toEnrichedEvent(VesselState s, boolean dark) {
+        VesselEvent v = VesselEvent.newBuilder()
+                .setMmsi(s.getMmsi())
+                .setLatitude(s.getLatitude())
+                .setLongitude(s.getLongitude())
+                .setSpeed(s.getSpeed())
+                .setHeading(0.0)   // heading is not retained in state; default to 0
+                .setTimestamp(Instant.ofEpochMilli(s.getLastSeenMs()))
+                .setEventType("AIS")
+                .build();
+        return EnrichedVesselEvent.newBuilder()
+                .setVesselEvent(v)
+                .setInRestrictedZone(s.isInRestrictedZone())
+                .setZoneName(s.getZoneName())
+                .setZoneType(s.getZoneType())
+                .setDistanceToPort(s.getDistanceToPort())
+                .setRiskScore(s.getRiskScore())
+                .setRiskLevel(s.getRiskLevel())
+                .setLoitering(s.isLoitering())
+                .setDarkVessel(dark)
+                .setSpeedAnomaly(s.isSpeedAnomaly())
+                .build();
     }
 
     static EnrichedVesselEvent withFlags(EnrichedVesselEvent src,

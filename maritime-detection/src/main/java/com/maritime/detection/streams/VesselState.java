@@ -7,7 +7,13 @@ import java.time.Instant;
  * Kafka Streams RocksDB state store.
  *
  * Serialized to/from JSON by {@link VesselStateSerdes} for the changelog topic.
- * Fields are deliberately minimal — only what the three detectors need.
+ * Holds both the minimal detector state and the enrichment context so the
+ * dark-vessel punctuator can reconstruct a complete {@code EnrichedVesselEvent}
+ * when it emits to {@code maritime.detections}.
+ *
+ * <p>Adding fields is backward-safe: Jackson defaults absent fields on
+ * deserialization, so existing changelog entries simply read with the new
+ * fields unset (null / 0 / false).
  */
 public class VesselState {
 
@@ -19,6 +25,15 @@ public class VesselState {
     private boolean loitering;
     private boolean darkVessel;
     private boolean speedAnomaly;
+
+    // Enrichment context — retained so the dark-vessel punctuator can rebuild
+    // a complete EnrichedVesselEvent without access to the original record.
+    private boolean inRestrictedZone;
+    private String  zoneName;
+    private String  zoneType;
+    private double  distanceToPort;
+    private double  riskScore;
+    private String  riskLevel;
 
     /** Required by Jackson for deserialization. */
     public VesselState() {}
@@ -51,6 +66,18 @@ public class VesselState {
     public void    setDarkVessel(boolean v)       { this.darkVessel = v; }
     public boolean isSpeedAnomaly()               { return speedAnomaly; }
     public void    setSpeedAnomaly(boolean v)     { this.speedAnomaly = v; }
+    public boolean isInRestrictedZone()           { return inRestrictedZone; }
+    public void    setInRestrictedZone(boolean v) { this.inRestrictedZone = v; }
+    public String  getZoneName()                  { return zoneName; }
+    public void    setZoneName(String v)          { this.zoneName = v; }
+    public String  getZoneType()                  { return zoneType; }
+    public void    setZoneType(String v)          { this.zoneType = v; }
+    public double  getDistanceToPort()            { return distanceToPort; }
+    public void    setDistanceToPort(double v)    { this.distanceToPort = v; }
+    public double  getRiskScore()                 { return riskScore; }
+    public void    setRiskScore(double v)         { this.riskScore = v; }
+    public String  getRiskLevel()                 { return riskLevel; }
+    public void    setRiskLevel(String v)         { this.riskLevel = v; }
     public Instant lastSeen()                     { return Instant.ofEpochMilli(lastSeenMs); }
 
     @Override
@@ -58,6 +85,7 @@ public class VesselState {
         return "VesselState{mmsi=" + mmsi + ", lat=" + latitude + ", lon=" + longitude
                 + ", speed=" + speed + ", lastSeenMs=" + lastSeenMs
                 + ", loitering=" + loitering + ", dark=" + darkVessel
-                + ", speedAnomaly=" + speedAnomaly + "}";
+                + ", speedAnomaly=" + speedAnomaly
+                + ", zone=" + zoneName + ", risk=" + riskLevel + "}";
     }
 }

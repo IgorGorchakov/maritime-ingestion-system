@@ -17,7 +17,7 @@ The detection subsystem currently living in `maritime-enricher` consists of exac
 | `streams/AvroEnrichedEventSerdes.java` | Avro serde wrapping Schema Registry |
 | `config/TopicConfig.java` — **partially** | Only the `maritimeDetections()` and `maritimeStateChangelog()` beans belong to detection |
 
-Everything else in `maritime-enricher` stays — `RiskScorerService`, `DedupService`, `PortDistanceProvider`, `ZoneRepository`, `KafkaConsumerConfig`, `KafkaProducerConfig`, `PipelineConfig`, Flyway migrations, and `PipelineIntegrationIT`.
+Everything else in `maritime-enricher` stays — `RiskScorerEnrichService`, `DedupService`, `PortDistanceProvider`, `ZoneRepository`, `KafkaConsumerConfig`, `KafkaProducerConfig`, `PipelineConfig`, Flyway migrations, and `PipelineIntegrationIT`.
 
 ---
 
@@ -41,11 +41,11 @@ Nothing. The only shared surface is `Topics.*` constants (already in `maritime-c
 
 ### What stays in `maritime-enricher` and why
 
-`KafkaConsumerConfig` — the listener container factory, DLQ recoverer, and ack mode are all consumer-side concerns for `RiskScorerService`. The detection topology uses the Kafka Streams native client, not Spring Kafka's `@KafkaListener`, so it needs none of this.
+`KafkaConsumerConfig` — the listener container factory, DLQ recoverer, and ack mode are all consumer-side concerns for `RiskScorerEnrichService`. The detection topology uses the Kafka Streams native client, not Spring Kafka's `@KafkaListener`, so it needs none of this.
 
 `TopicConfig` — the `maritimeDetections()` and `maritimeStateChangelog()` beans are the only ones that belong to detection. However, topic declarations are idempotent in Kafka (`KafkaAdmin` uses `CreateTopics` which is a no-op if the topic already exists). The cleanest split: move `maritimeDetections()` and `maritimeStateChangelog()` to `maritime-detection`, leave the rest in `maritime-enricher`.
 
-`Flyway migrations` — `V1__zones.sql` (PostGIS zones catalog) and `V2__spark_batch_tables.sql` stay in `maritime-enricher` since they're required by `ZoneRepository`, which `RiskScorerService` depends on. The detection service doesn't touch Postgres at all — it's pure Kafka Streams / RocksDB.
+`Flyway migrations` — `V1__zones.sql` (PostGIS zones catalog) and `V2__spark_batch_tables.sql` stay in `maritime-enricher` since they're required by `ZoneRepository`, which `RiskScorerEnrichService` depends on. The detection service doesn't touch Postgres at all — it's pure Kafka Streams / RocksDB.
 
 `spring-boot-starter-data-jpa` + `postgresql` — stay in `maritime-enricher`. Detection needs neither.
 

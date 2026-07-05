@@ -16,8 +16,10 @@ import org.springframework.web.bind.annotation.*;
 /**
  * Consumes enriched vessel events from Kafka and persists them to:
  * <ul>
- *   <li><b>Cold tier (Parquet on the local filesystem):</b> one file per event,
- *       partitioned by {@code date=/mmsi=} for Spark partition pruning (Phase 7).</li>
+ *   <li><b>Cold tier (JSON on the local filesystem):</b> one file per event,
+ *       partitioned by {@code date=/mmsi=} so Spark can prune partitions without a
+ *       metastore. JSON avoids the Hadoop/AWS SDK transitive deps a Parquet writer
+ *       would pull into the Spring Boot process.</li>
  *   <li><b>Hot tier (Postgres):</b> latest state per MMSI for real-time REST queries.</li>
  * </ul>
  *
@@ -32,11 +34,11 @@ import org.springframework.web.bind.annotation.*;
 public class VesselController {
 
     private final ColdTierWriter coldTier;
-    private final VesselStateHotStore hostTier;
+    private final VesselStateHotStore hotTier;
 
-    public VesselController(ColdTierWriter coldTier, VesselStateHotStore hostTier) {
+    public VesselController(ColdTierWriter coldTier, VesselStateHotStore hotTier) {
         this.coldTier   = coldTier;
-        this.hostTier = hostTier;
+        this.hotTier = hotTier;
     }
 
     /**
@@ -66,14 +68,14 @@ public class VesselController {
 
     /**
      * Shared persistence logic for both listeners.
-     * Writes to the cold tier (Parquet) and hot tier (Postgres), then acks.
+     * Writes to the cold tier (JSON) and hot tier (Postgres), then acks.
      * Any exception propagates to DefaultErrorHandler (retry → DLT).
      */
     private void persist(EnrichedVesselEvent event, Acknowledgment ack) {
         VesselEvent vessel = event.getVesselEvent();
 
-        coldTier.write(event);     // cold tier: Parquet, partitioned by date=/mmsi=
-        hostTier.upsert(event);  // hot tier: latest state per MMSI
+        coldTier.write(event);     // cold tier: JSON, partitioned by date=/mmsi=
+        hotTier.upsert(event);  // hot tier: latest state per MMSI
 
         // Offset committed only after both writes succeed.
         ack.acknowledge();
@@ -88,7 +90,7 @@ public class VesselController {
 
     @GetMapping(value = "/vessels/{mmsi}", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> getVesselRisk(@PathVariable String mmsi) {
-        return hostTier.findByMmsi(mmsi)
+        return hotTier.findByMmsi(mmsi)
                 .map(AvroJson::toJson)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
