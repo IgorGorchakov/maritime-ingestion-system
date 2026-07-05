@@ -31,23 +31,6 @@ import com.maritime.common.kafka.Topics;
  */
 public enum SimulatedVessel {
 
-    /**
-     * AIS reception channel — determines which raw topic this vessel's events
-     * are published to. Each source type has independent scaling, retention,
-     * and failure-handling characteristics.
-     */
-    public enum AisSource {
-        /** Land/port-based VHF receiver — high update rate, short range. */
-        TERRESTRIAL(Topics.AIS_RAW_TERRESTRIAL),
-        /** Satellite AIS receiver — global coverage, lower update rate, potential staleness. */
-        SATELLITE  (Topics.AIS_RAW_SATELLITE),
-        /** AIS-to-AIS vessel relay — peer reports, variable reliability. */
-        VESSEL     (Topics.AIS_RAW_VESSEL);
-
-        public final String topic;
-        AisSource(String topic) { this.topic = topic; }
-    }
-
     //                  mmsi         label               speed  ticks  waypoints           source
     // Coastal transit within VHF range → terrestrial receiver
     NORMAL_TRANSIT("123456789", "Normal Transit",        12.0,  10, new double[][]{
@@ -99,6 +82,23 @@ public enum SimulatedVessel {
         {29.0, -89.6}, {28.9, -89.4}, {29.1, -89.2}, {29.3, -89.0},
         {29.4, -89.2}, {29.2, -89.5}, {29.1, -89.8}, {29.0, -90.2}
     }, AisSource.TERRESTRIAL);
+
+    /**
+     * AIS reception channel — determines which raw topic this vessel's events
+     * are published to. Each source type has independent scaling, retention,
+     * and failure-handling characteristics.
+     */
+    public enum AisSource {
+        /** Land/port-based VHF receiver — high update rate, short range. */
+        TERRESTRIAL(Topics.AIS_RAW_TERRESTRIAL),
+        /** Satellite AIS receiver — global coverage, lower update rate, potential staleness. */
+        SATELLITE  (Topics.AIS_RAW_SATELLITE),
+        /** AIS-to-AIS vessel relay — peer reports, variable reliability. */
+        VESSEL     (Topics.AIS_RAW_VESSEL);
+
+        public final String topic;
+        AisSource(String topic) { this.topic = topic; }
+    }
 
     public final String    mmsi;
     public final String    label;

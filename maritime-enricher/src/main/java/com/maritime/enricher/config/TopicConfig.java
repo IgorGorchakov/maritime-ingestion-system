@@ -65,4 +65,21 @@ public class TopicConfig {
     public NewTopic maritimeAisQuarantine() {
         return TopicBuilder.name(Topics.QUARANTINE).partitions(PARTITIONS).replicas(-1).build();
     }
+
+    /**
+     * Output topic for enriched H3 cell crossing events.
+     * Produced by HexCrossingEnricherService with zone and risk context.
+     */
+    @Bean
+    public NewTopic maritimeHexCrossingsEnriched() {
+        return TopicBuilder.name(Topics.HEX_CROSSINGS_ENRICHED).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    /**
+     * Dead-letter topic for unprocessable enriched crossing events.
+     */
+    @Bean
+    public NewTopic maritimeHexCrossingsEnrichedDlt() {
+        return TopicBuilder.name(Topics.HEX_CROSSINGS_ENRICHED + Topics.DLT_SUFFIX).partitions(PARTITIONS).replicas(-1).build();
+    }
 }

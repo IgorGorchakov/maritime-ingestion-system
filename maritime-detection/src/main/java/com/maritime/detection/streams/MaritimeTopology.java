@@ -1,5 +1,6 @@
 package com.maritime.detection.streams;
 
+import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.kafka.Topics;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +10,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
@@ -70,8 +72,9 @@ public class MaritimeTopology {
     /** RocksDB state directory — injectable so tests and multi-instance deployments
      *  can override it without a code change. */
     private final String                  stateDir;
-    private final AvroEnrichedEventSerdes consumeSerde;
-    private final AvroEnrichedEventSerdes produceSerde;
+    private final AvroEnrichedEventSerdes      consumeSerde;
+    private final AvroEnrichedEventSerdes      produceSerde;
+    private final AvroHexCrossingEventSerdes   hexCrossingSerde;
 
     private KafkaStreams streams;
 
@@ -80,12 +83,13 @@ public class MaritimeTopology {
             @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers,
             @Value("${schema.registry.url:http://localhost:8085}")     String schemaRegistryUrl,
             @Value("${kafka.streams.state-dir:/tmp/kafka-streams/maritime}") String stateDir) {
-        this.meterRegistry     = meterRegistry;
-        this.bootstrapServers  = bootstrapServers;
-        this.schemaRegistryUrl = schemaRegistryUrl;
-        this.stateDir          = stateDir;
-        this.consumeSerde      = new AvroEnrichedEventSerdes(schemaRegistryUrl);
-        this.produceSerde      = new AvroEnrichedEventSerdes(schemaRegistryUrl);
+        this.meterRegistry      = meterRegistry;
+        this.bootstrapServers   = bootstrapServers;
+        this.schemaRegistryUrl  = schemaRegistryUrl;
+        this.stateDir           = stateDir;
+        this.consumeSerde       = new AvroEnrichedEventSerdes(schemaRegistryUrl);
+        this.produceSerde       = new AvroEnrichedEventSerdes(schemaRegistryUrl);
+        this.hexCrossingSerde   = new AvroHexCrossingEventSerdes(schemaRegistryUrl);
     }
 
     @PostConstruct
@@ -120,14 +124,14 @@ public class MaritimeTopology {
         // serialization is interrupted when the connection pool is released.
         consumeSerde.close();
         produceSerde.close();
+        hexCrossingSerde.close();
         log.info("MaritimeTopology serdes closed");
     }
 
     Topology buildTopology() {
         StreamsBuilder builder = new StreamsBuilder();
 
-        // RocksDB state store — one VesselState per MMSI, fault-tolerant via
-        // the changelog topic declared in DetectionTopicConfig.
+        // ── Existing vessel-state store ───────────────────────────────────────
         StoreBuilder<KeyValueStore<String, VesselState>> storeBuilder =
                 Stores.keyValueStoreBuilder(
                         Stores.persistentKeyValueStore(STATE_STORE),
@@ -135,13 +139,26 @@ public class MaritimeTopology {
                         new VesselStateSerdes());
         builder.addStateStore(storeBuilder);
 
-        builder.stream(Topics.ENRICHED, Consumed.with(Serdes.String(), consumeSerde))
-                // VesselDetectionProcessor updates per-MMSI state and forwards only
-                // when at least one detection flag fires.
-                .process(() -> new VesselDetectionProcessor(meterRegistry), STATE_STORE)
-                // null values mean no flag fired; drop them before the output topic.
-                .filter((key, value) -> value != null)
-                .to(Topics.DETECTIONS, Produced.with(Serdes.String(), produceSerde));
+        // ── New hex-cell store (mmsi → last H3 cell address) ─────────────────
+        StoreBuilder<KeyValueStore<String, String>> hexStoreBuilder =
+                Stores.keyValueStoreBuilder(
+                        Stores.persistentKeyValueStore(HexCrossingProcessor.HEX_STATE_STORE),
+                        Serdes.String(),
+                        Serdes.String());
+        builder.addStateStore(hexStoreBuilder);
+
+        // ── Shared source stream ──────────────────────────────────────────────
+        KStream<String, EnrichedVesselEvent> source =
+                builder.stream(Topics.ENRICHED, Consumed.with(Serdes.String(), consumeSerde));
+
+        // ── Branch 1: existing behavioural detectors ──────────────────────────
+        source.process(() -> new VesselDetectionProcessor(meterRegistry), STATE_STORE)
+              .filter((key, value) -> value != null)
+              .to(Topics.DETECTIONS, Produced.with(Serdes.String(), produceSerde));
+
+        // ── Branch 2: H3 hex cell crossing detector ───────────────────────────
+        source.process(() -> new HexCrossingProcessor(), HexCrossingProcessor.HEX_STATE_STORE)
+              .to(Topics.HEX_CROSSINGS, Produced.with(Serdes.String(), hexCrossingSerde));
 
         return builder.build();
     }

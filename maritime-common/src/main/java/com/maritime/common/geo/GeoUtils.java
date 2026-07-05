@@ -1,15 +1,36 @@
 package com.maritime.common.geo;
 
+import com.uber.h3core.H3Core;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
 
+import java.io.IOException;
 import java.util.List;
 
 public class GeoUtils {
 
     private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory();
+
+    private static final H3Core H3;
+    static {
+        try { H3 = H3Core.newInstance(); }
+        catch (IOException e) { throw new ExceptionInInitializerError(e); }
+    }
+
+    public static final int HEX_RESOLUTION = 7;
+
+    /** Returns the H3 resolution-7 cell address containing this position. */
+    public static String latLonToH3Cell(double lat, double lon) {
+        return H3.latLngToCellAddress(lat, lon, HEX_RESOLUTION);
+    }
+
+    /** Returns {lat, lon} of the centroid of the given H3 cell address. */
+    public static double[] h3CellCentroid(String cellAddress) {
+        com.uber.h3core.util.LatLng c = H3.cellToLatLng(cellAddress);
+        return new double[]{c.lat, c.lng};
+    }
 
     /**
      * Checks if a point (lat, lon) is inside a polygon defined by a list of coordinates.

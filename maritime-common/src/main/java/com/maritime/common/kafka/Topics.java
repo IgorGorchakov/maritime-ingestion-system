@@ -51,4 +51,13 @@ public final class Topics {
 
     /** Dead-letter topic for poison records on {@link #ENRICHED}. */
     public static final String ENRICHED_DLT = ENRICHED + DLT_SUFFIX;
+
+    /** Raw H3 cell crossing events from the detection topology. */
+    public static final String HEX_CROSSINGS = "maritime.hex.crossings";
+
+    /** Enriched crossing events (zone + risk context for destination cell). */
+    public static final String HEX_CROSSINGS_ENRICHED = "maritime.hex.crossings.enriched";
+
+    /** Dead-letter topic for unprocessable crossing events. */
+    public static final String HEX_CROSSINGS_DLT = HEX_CROSSINGS + DLT_SUFFIX;
 }

@@ -51,4 +51,31 @@ public class DetectionTopicConfig {
         return TopicBuilder.name("maritime-detection-topology-vessel-state-store-changelog")
                 .partitions(PARTITIONS).replicas(-1).build();
     }
+
+    /**
+     * Output topic for raw H3 cell crossing events.
+     * Produced by HexCrossingProcessor; consumed by HexCrossingEnricherService.
+     */
+    @Bean
+    public NewTopic maritimeHexCrossings() {
+        return TopicBuilder.name(Topics.HEX_CROSSINGS).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    /**
+     * Dead-letter topic for unprocessable raw crossing events.
+     */
+    @Bean
+    public NewTopic maritimeHexCrossingsDlt() {
+        return TopicBuilder.name(Topics.HEX_CROSSINGS_DLT).partitions(PARTITIONS).replicas(-1).build();
+    }
+
+    /**
+     * Internal changelog topic for the hex-cell-store RocksDB store.
+     * Declared explicitly to guarantee the correct partition count.
+     */
+    @Bean
+    public NewTopic hexCellStoreChangelog() {
+        return TopicBuilder.name("maritime-detection-topology-hex-cell-store-changelog")
+                .partitions(PARTITIONS).replicas(-1).build();
+    }
 }

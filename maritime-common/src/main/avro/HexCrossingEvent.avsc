@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "HexCrossingEvent",
+  "namespace": "com.maritime.common.dto",
+  "doc": "Emitted when a vessel transitions from one H3 resolution-7 cell to another.",
+  "fields": [
+    { "name": "mmsi",       "type": { "type": "string", "avro.java.string": "String" } },
+    { "name": "fromCell",   "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "H3 cell address (res 7) the vessel departed." },
+    { "name": "toCell",     "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "H3 cell address (res 7) the vessel entered." },
+    { "name": "latitude",   "type": "double" },
+    { "name": "longitude",  "type": "double" },
+    { "name": "speed",      "type": "double" },
+    { "name": "sourceType", "type": ["null", { "type": "string", "avro.java.string": "String" }], "default": null },
+    { "name": "timestamp",  "type": { "type": "long", "logicalType": "timestamp-millis" } }
+  ]
+}

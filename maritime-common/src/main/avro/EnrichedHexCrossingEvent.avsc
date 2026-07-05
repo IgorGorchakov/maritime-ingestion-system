@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "EnrichedHexCrossingEvent",
+  "namespace": "com.maritime.common.dto",
+  "doc": "HexCrossingEvent enriched with zone and risk context for the destination cell centroid.",
+  "fields": [
+    { "name": "hexCrossingEvent",   "type": "com.maritime.common.dto.HexCrossingEvent" },
+    { "name": "toCellCentroidLat",  "type": "double" },
+    { "name": "toCellCentroidLon",  "type": "double" },
+    { "name": "inRestrictedZone",   "type": "boolean" },
+    { "name": "zoneName",  "type": ["null", { "type": "string", "avro.java.string": "String" }], "default": null },
+    { "name": "zoneType",  "type": ["null", { "type": "string", "avro.java.string": "String" }], "default": null },
+    { "name": "distanceToPort", "type": "double" },
+    { "name": "riskScore",      "type": "double" },
+    { "name": "riskLevel",      "type": { "type": "string", "avro.java.string": "String" },
+      "doc": "LOW | MEDIUM | HIGH" }
+  ]
+}
