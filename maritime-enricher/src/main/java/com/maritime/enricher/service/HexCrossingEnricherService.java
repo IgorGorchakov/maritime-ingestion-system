@@ -4,6 +4,7 @@ import com.maritime.common.dto.EnrichedHexCrossingEvent;
 import com.maritime.common.dto.HexCrossingEvent;
 import com.maritime.common.geo.GeoUtils;
 import com.maritime.common.kafka.Topics;
+import com.maritime.common.risk.RiskPolicy;
 import com.maritime.enricher.geo.ZoneRepository;
 import com.maritime.enricher.geo.ZoneRepository.ZoneView;
 import lombok.extern.slf4j.Slf4j;
@@ -63,11 +64,11 @@ public class HexCrossingEnricherService {
         double         distToPort = portDistanceProvider.distanceToNearestPortNm(lat, lon);
 
         double riskScore = 0.0;
-        if (restricted)                    riskScore += 50;
-        else if ("PORT".equals(zoneType))  riskScore += 20;
-        else if ("EEZ".equals(zoneType))   riskScore += 10;
-        if (distToPort < 10)               riskScore += 20;
-        String riskLevel = riskScore >= 50 ? "HIGH" : riskScore >= 20 ? "MEDIUM" : "LOW";
+        if (restricted)                    riskScore += RiskPolicy.RESTRICTED_ZONE_WEIGHT;
+        else if ("PORT".equals(zoneType))  riskScore += RiskPolicy.PORT_ZONE_WEIGHT;
+        else if ("EEZ".equals(zoneType))   riskScore += RiskPolicy.EEZ_ZONE_WEIGHT;
+        if (distToPort < RiskPolicy.NEAR_PORT_THRESHOLD_NM) riskScore += RiskPolicy.NEAR_PORT_WEIGHT;
+        String riskLevel = RiskPolicy.toRiskLevel(riskScore);
 
         EnrichedHexCrossingEvent enriched = EnrichedHexCrossingEvent.newBuilder()
                 .setHexCrossingEvent(event)

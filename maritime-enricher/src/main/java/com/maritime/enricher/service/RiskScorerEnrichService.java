@@ -3,6 +3,7 @@ package com.maritime.enricher.service;
 import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.dto.VesselEvent;
 import com.maritime.common.kafka.Topics;
+import com.maritime.common.risk.RiskPolicy;
 import com.maritime.common.validation.ValidationResult;
 import com.maritime.common.validation.VesselEventValidator;
 import com.maritime.enricher.geo.ZoneRepository;
@@ -149,13 +150,13 @@ public class RiskScorerEnrichService {
         double distanceToPort = portDistanceProvider.distanceToNearestPortNm(lat, lon);
 
         double riskScore = 0.0;
-        if (inRestrictedZone)             riskScore += 50;
-        else if ("PORT".equals(zoneType)) riskScore += 20;
-        else if ("EEZ".equals(zoneType))  riskScore += 10;
-        if (distanceToPort < 10)          riskScore += 20;
-        if (event.getSpeed() > 25)        riskScore += 10;
+        if (inRestrictedZone)             riskScore += RiskPolicy.RESTRICTED_ZONE_WEIGHT;
+        else if ("PORT".equals(zoneType)) riskScore += RiskPolicy.PORT_ZONE_WEIGHT;
+        else if ("EEZ".equals(zoneType))  riskScore += RiskPolicy.EEZ_ZONE_WEIGHT;
+        if (distanceToPort < RiskPolicy.NEAR_PORT_THRESHOLD_NM)      riskScore += RiskPolicy.NEAR_PORT_WEIGHT;
+        if (event.getSpeed() > RiskPolicy.HIGH_SPEED_THRESHOLD_KN)   riskScore += RiskPolicy.HIGH_SPEED_WEIGHT;
 
-        String riskLevel = riskScore >= 50 ? "HIGH" : riskScore >= 20 ? "MEDIUM" : "LOW";
+        String riskLevel = RiskPolicy.toRiskLevel(riskScore);
         meterRegistry.counter("risk.level", "level", riskLevel).increment();
 
         // ── Publish to maritime.enriched ──────────────────────────────────────

@@ -2,7 +2,7 @@ package com.maritime.enricher.service;
 
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Placeholder {@link PortDistanceProvider} that returns a uniform random value
@@ -30,16 +30,16 @@ import java.util.Random;
  * bean body — no other file needs to change.
  *
  * <h3>Thread safety</h3>
- * A new {@link Random} instance is created per call, which is safe but slightly
- * wasteful. Acceptable for a placeholder; the real implementation will use a
- * thread-safe PostGIS query via Spring's {@code JdbcTemplate}.
+ * Uses {@link ThreadLocalRandom} — no allocation per call, no contention.
+ * The real implementation will use a thread-safe PostGIS query via Spring's
+ * {@code JdbcTemplate}.
  */
 @Slf4j
 public class RandomPortDistanceProvider implements PortDistanceProvider {
 
     @Override
     public double distanceToNearestPortNm(double latitudeDeg, double longitudeDeg) {
-        double distanceNm = new Random().nextDouble() * 100;
+        double distanceNm = ThreadLocalRandom.current().nextDouble(100.0);
         log.debug("RandomPortDistanceProvider: placeholder distance {} NM for ({}, {}) "
                 + "— replace with PostGisPortDistanceProvider in Phase 7",
                 String.format("%.1f", distanceNm), latitudeDeg, longitudeDeg);
