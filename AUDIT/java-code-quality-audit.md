@@ -1,55 +1,20 @@
 # Java Code Quality Audit — maritime-ingestion-system
 
-> **Update:** C1, C2, H1, M1, M2, L3, H4, and L4 have been resolved and removed from this report.
+> **Update:** C1, C2, H1, M1, M2, L3, H4, L4, and H2 have been resolved and removed from this report.
 > Surviving finding IDs are preserved (not renumbered), so earlier references remain valid.
 
 ## Summary
 
 - **Scope reviewed:** All 5 Spring Boot services (`maritime-ingestion`, `maritime-enricher`, `maritime-detection`, `maritime-storage`, `maritime-api`) and `maritime-spark` read fully. `maritime-common` read fully. Generated Avro sources under `target/` skipped. Test classes (`src/test/java`) skipped per default scope.
 - **Files reviewed:** 28 `.java` files across 7 modules
-- **Findings:** 6 open (Critical: 0, High: 2, Medium: 2, Low: 2)
-- **Top risks:** `FileSystemJsonColdTier` derives the cold-tier partition date from the JVM default timezone rather than UTC (H3), so at the midnight boundary events are silently written under the wrong `date=` partition and excluded from the correct day's Spark aggregates. `VesselController` in `maritime-storage` bundles two Kafka consumers and a REST query endpoint in one class (H2), two independent responsibilities that evolve separately.
+- **Findings:** 5 open (Critical: 0, High: 1, Medium: 2, Low: 2)
+- **Top risks:** `FileSystemJsonColdTier` derives the cold-tier partition date from the JVM default timezone rather than UTC (H3), so at the midnight boundary events are silently written under the wrong `date=` partition and excluded from the correct day's Spark aggregates.
 
 ---
 
 ## Findings by severity
 
 ### 🟠 High
-
-#### [H2] Kafka consumer and REST query handler in one class — `maritime-storage/…/VesselController.java`
-
-**Category:** SOLID — SRP  
-**What:** `VesselController` is annotated `@RestController` and simultaneously holds two `@KafkaListener` methods (`consumeEnrichedEvent`, `consumeDetectionEvent`) and one `@GetMapping` endpoint (`getVesselRisk`). The class has two entirely independent responsibilities: consuming and persisting Kafka events, and serving HTTP queries.  
-**Why it matters:** The two responsibilities evolve independently. Adding rate-limiting, caching, or error-handling to the REST endpoint has nothing to do with the Kafka consumer configuration (ack mode, retry policy, dead-letter routing). The naming `VesselController` implies a pure REST class; readers searching for the Kafka consumer won't look here. In production, the consumer thread and the Tomcat thread pool share the same object, which works by accident — any future locking or state would need to consider both.
-
-**Suggested fix:**
-```java
-// Consumer concern
-@Service
-public class VesselEventConsumer {
-    private final ColdTierWriter coldTier;
-    private final VesselStateHotStore hotTier;
-
-    @KafkaListener(topics = Topics.ENRICHED,    groupId = "storage-service")
-    public void consumeEnriched(EnrichedVesselEvent event, Acknowledgment ack) { persist(event, ack); }
-
-    @KafkaListener(topics = Topics.DETECTIONS,  groupId = "storage-service")
-    public void consumeDetection(EnrichedVesselEvent event, Acknowledgment ack) { persist(event, ack); }
-    // private persist() stays here
-}
-
-// Query concern
-@RestController
-@RequestMapping("/api/v1")
-public class VesselQueryController {
-    private final VesselStateHotStore hotTier;
-
-    @GetMapping(value = "/vessels/{mmsi}", ...)
-    public ResponseEntity<String> getVesselRisk(@PathVariable String mmsi) { ... }
-}
-```
-
----
 
 #### [H3] Cold-tier partition date derived from JVM default timezone — `maritime-storage/…/FileSystemJsonColdTier.java:41`
 
@@ -180,15 +145,10 @@ public final class EventTypes {
 | Class | Module | Findings | Priority |
 |:---|:---|:---|:---|
 | `FileSystemJsonColdTier` | `maritime-storage` | H3 | High — data-correctness at timezone boundary |
-| `VesselController` | `maritime-storage` | H2 | High — mixed responsibilities |
 | `RiskScorerEnrichService` / `HexCrossingEnricherService` | `maritime-enricher` | M3 | Medium — duplicated risk model |
 | `RandomPortDistanceProvider` | `maritime-enricher` | M4 | Medium — `new Random()` per call in hot path |
 
-**Recommended refactor order:**
-1. **H3** — add `ZoneOffset.UTC` to `LocalDate.now()`; single-character diff, zero risk.
-2. **H2** — split `VesselController` into a Kafka consumer service and a REST query controller.
-3. **M3** — extract shared `RiskPolicy` constants into `maritime-common`; both enricher services reference it.
-4. **M4** — switch `RandomPortDistanceProvider` from `new Random()` to `ThreadLocalRandom.current()`.
+**Remaining open findings:** H3, M3, M4, L1, L2.
 
 ---
 
