@@ -11,6 +11,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 
 /**
  * Filesystem-backed cold tier — writes one JSON file per event under a
@@ -38,7 +39,7 @@ public class FileSystemJsonColdTier implements ColdTierWriter {
     public void write(EnrichedVesselEvent event) {
         String mmsi    = event.getVesselEvent().getMmsi();
         long   epochMs = event.getVesselEvent().getTimestamp().toEpochMilli();
-        String isoDate = LocalDate.now().toString();
+        String isoDate = LocalDate.ofInstant(event.getVesselEvent().getTimestamp(), ZoneOffset.UTC).toString();
 
         java.nio.file.Path partitionDir = baseDir.resolve(
                 String.format("vessel-events/date=%s/mmsi=%s", isoDate, mmsi));

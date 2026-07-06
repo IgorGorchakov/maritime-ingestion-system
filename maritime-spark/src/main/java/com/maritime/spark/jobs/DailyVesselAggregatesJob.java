@@ -74,7 +74,7 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         log.info("DailyVesselAggregatesJob starting — date={} input={}",
-                props.getBatchDate(), props.parquetInputPath());
+                props.batchDate(), props.inputPath());
         execute();
         log.info("DailyVesselAggregatesJob complete");
     }
@@ -90,10 +90,10 @@ public class DailyVesselAggregatesJob implements ApplicationRunner {
                 .load(props.inputPath());
 
         Dataset<Row> aggregated = raw
-                .filter(col("date").equalTo(props.getBatchDate()))
+                .filter(col("date").equalTo(props.batchDate()))
                 .groupBy(
                         col("vesselEvent.mmsi").alias("mmsi"),
-                        lit(props.getBatchDate()).cast("date").alias("date")
+                        lit(props.batchDate()).cast("date").alias("date")
                 )
                 .agg(
                         count("*").alias("event_count"),

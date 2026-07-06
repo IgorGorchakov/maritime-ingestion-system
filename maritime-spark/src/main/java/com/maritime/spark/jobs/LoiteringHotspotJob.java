@@ -71,7 +71,7 @@ public class LoiteringHotspotJob implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("LoiteringHotspotJob starting — date={}", props.getBatchDate());
+        log.info("LoiteringHotspotJob starting — date={}", props.batchDate());
         execute();
         log.info("LoiteringHotspotJob complete");
     }
@@ -86,11 +86,11 @@ public class LoiteringHotspotJob implements ApplicationRunner {
         // whether to proceed. Without it we'd have to attempt the full aggregation
         // and write, then discover the table is empty after the fact.
         Dataset<Row> loitering = raw
-                .filter(col("date").equalTo(props.getBatchDate()))
+                .filter(col("date").equalTo(props.batchDate()))
                 .filter(col("loitering").equalTo(true));
 
         if (loitering.isEmpty()) {
-            log.info("No loitering events for date={}; skipping hotspot write", props.getBatchDate());
+            log.info("No loitering events for date={}; skipping hotspot write", props.batchDate());
             return;
         }
 
@@ -105,7 +105,7 @@ public class LoiteringHotspotJob implements ApplicationRunner {
                         round(floor(col("vesselEvent.longitude")
                                 .divide(GRID_DEG)).multiply(GRID_DEG), 6))
                 .groupBy(
-                        lit(props.getBatchDate()).cast("date").alias("date"),
+                        lit(props.batchDate()).cast("date").alias("date"),
                         col("cell_lat"),
                         col("cell_lon")
                 )

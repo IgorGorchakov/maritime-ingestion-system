@@ -38,12 +38,12 @@ public class JobWriter {
     private final Properties jdbcProps;
 
     public JobWriter(SparkJobProperties props) {
-        this.jdbcUrl = props.getDbUrl();
+        this.jdbcUrl = props.dbUrl();
 
         // Built once — user/password/driver are constants for the job lifetime.
         this.jdbcProps = new Properties();
-        this.jdbcProps.setProperty("user",     props.getDbUser());
-        this.jdbcProps.setProperty("password", props.getDbPass());
+        this.jdbcProps.setProperty("user",     props.dbUser());
+        this.jdbcProps.setProperty("password", props.dbPass() != null ? props.dbPass() : "");
         this.jdbcProps.setProperty("driver",   "org.postgresql.Driver");
     }
 

@@ -68,7 +68,7 @@ public class RiskRollupJob implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("RiskRollupJob starting — date={}", props.getBatchDate());
+        log.info("RiskRollupJob starting — date={}", props.batchDate());
         execute();
         log.info("RiskRollupJob complete");
     }
@@ -80,10 +80,10 @@ public class RiskRollupJob implements ApplicationRunner {
                 .load(props.inputPath());
 
         Dataset<Row> rollup = raw
-                .filter(col("date").equalTo(props.getBatchDate()))
+                .filter(col("date").equalTo(props.batchDate()))
                 .groupBy(
                         col("vesselEvent.mmsi").alias("mmsi"),
-                        lit(props.getBatchDate()).cast("date").alias("date")
+                        lit(props.batchDate()).cast("date").alias("date")
                 )
                 .agg(
                         // expr() is correct for approx_percentile — it is a Spark

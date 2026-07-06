@@ -1,5 +1,7 @@
 package com.maritime.spark.config;
 
+import com.maritime.spark.SparkJobProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
@@ -28,5 +30,6 @@ import org.springframework.context.annotation.PropertySource;
 @Configuration
 @ComponentScan("com.maritime.spark")
 @PropertySource("classpath:application.properties")
+@EnableConfigurationProperties(SparkJobProperties.class)
 public class SparkContextConfig {
 }

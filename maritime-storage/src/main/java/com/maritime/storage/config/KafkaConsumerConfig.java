@@ -1,55 +1,65 @@
 package com.maritime.storage.config;
 
 import com.maritime.common.observability.CorrelationIdRecordInterceptor;
+import com.maritime.storage.config.properties.StorageKafkaProperties;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
-import org.apache.kafka.common.TopicPartition;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.kafka.listener.ContainerProperties;
-import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Kafka consumer configuration for the storage service.
+ *
+ * <p>Configures the listener container factory used by
+ * {@link com.maritime.storage.service.VesselEventConsumer} for the enriched and
+ * detection topics. Ack mode is {@code MANUAL_IMMEDIATE} for at-least-once semantics;
+ * a {@link DeadLetterPublishingRecoverer} routes poison records to {@code <topic>.DLT}
+ * after 3 retries at 1 s intervals.
+ *
+ * <p>All tunable values are injected via {@link StorageKafkaProperties} — a typed
+ * {@code @ConfigurationProperties} record whose defaults live only in
+ * {@code application.properties} (audit H4). The previous {@code @Value} inline
+ * defaults are removed.
+ */
 @Configuration
 public class KafkaConsumerConfig {
 
-    @Value("${schema.registry.url:http://localhost:8085}")
-    private String schemaRegistryUrl;
+    private final StorageKafkaProperties kafka;
 
-    @Value("${spring.kafka.consumer.group-id:storage-service}")
-    private String groupId;
+    public KafkaConsumerConfig(StorageKafkaProperties kafka) {
+        this.kafka = kafka;
+    }
 
-    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
-    private String bootstrapServers;
-
-    private Map<String, Object> consumerProps(String groupId) {
+    private Map<String, Object> consumerProps() {
         Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,        kafka.bootstrapServers());
+        props.put(ConsumerConfig.GROUP_ID_CONFIG,                 kafka.groupId());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,        "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,   StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class);
-        props.put("schema.registry.url", schemaRegistryUrl);
-        props.put("specific.avro.reader", true);
+        props.put("schema.registry.url",                          kafka.schemaRegistryUrl());
+        props.put("specific.avro.reader",                         true);
         return props;
     }
 
     @Bean
     public ConsumerFactory<String, Object> consumerFactory() {
-        Map<String, Object> props = consumerProps(groupId);
-        return new DefaultKafkaConsumerFactory<>(props);
+        return new DefaultKafkaConsumerFactory<>(consumerProps());
     }
 
     @Bean
@@ -63,8 +73,8 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
 
-        // Bind the correlation id off each record's header into MDC before the listener
-        // runs, so log lines carry the same id that originated upstream at ingestion.
+        // Bind the correlation ID off each record header into MDC before the listener
+        // runs, so log lines carry the same ID that originated upstream at ingestion.
         factory.setRecordInterceptor(correlationIdRecordInterceptor);
 
         // MANUAL_IMMEDIATE: offset committed only after listener returns successfully.

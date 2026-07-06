@@ -15,7 +15,7 @@ import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.apache.kafka.streams.state.Stores;
-import org.springframework.beans.factory.annotation.Value;
+import com.maritime.detection.config.DetectionProperties;
 import org.springframework.stereotype.Component;
 
 import jakarta.annotation.PostConstruct;
@@ -78,15 +78,11 @@ public class MaritimeTopology {
 
     private KafkaStreams streams;
 
-    public MaritimeTopology(
-            MeterRegistry meterRegistry,
-            @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers,
-            @Value("${schema.registry.url:http://localhost:8085}")     String schemaRegistryUrl,
-            @Value("${kafka.streams.state-dir:/tmp/kafka-streams/maritime}") String stateDir) {
+    public MaritimeTopology(MeterRegistry meterRegistry, DetectionProperties config) {
         this.meterRegistry      = meterRegistry;
-        this.bootstrapServers   = bootstrapServers;
-        this.schemaRegistryUrl  = schemaRegistryUrl;
-        this.stateDir           = stateDir;
+        this.bootstrapServers   = config.bootstrapServers();
+        this.schemaRegistryUrl  = config.schemaRegistryUrl();
+        this.stateDir           = config.stateDir();
         this.consumeSerde       = new AvroEnrichedEventSerdes(schemaRegistryUrl);
         this.produceSerde       = new AvroEnrichedEventSerdes(schemaRegistryUrl);
         this.hexCrossingSerde   = new AvroHexCrossingEventSerdes(schemaRegistryUrl);
