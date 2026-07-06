@@ -11,6 +11,8 @@ import java.util.List;
 
 public class GeoUtils {
 
+    private GeoUtils() {}
+
     private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory();
 
     private static final H3Core H3;

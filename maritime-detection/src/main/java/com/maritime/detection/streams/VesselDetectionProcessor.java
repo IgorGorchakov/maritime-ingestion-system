@@ -3,6 +3,7 @@ package com.maritime.detection.streams;
 import com.maritime.common.dto.EnrichedVesselEvent;
 import com.maritime.common.dto.VesselEvent;
 import com.maritime.common.geo.GeoUtils;
+import com.maritime.common.kafka.EventTypes;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.streams.processor.PunctuationType;
@@ -203,7 +204,7 @@ public class VesselDetectionProcessor
                 .setSpeed(s.getSpeed())
                 .setHeading(0.0)   // heading is not retained in state; default to 0
                 .setTimestamp(Instant.ofEpochMilli(s.getLastSeenMs()))
-                .setEventType("AIS")
+                .setEventType(EventTypes.AIS)
                 .build();
         return EnrichedVesselEvent.newBuilder()
                 .setVesselEvent(v)

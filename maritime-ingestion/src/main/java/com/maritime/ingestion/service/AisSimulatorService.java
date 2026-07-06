@@ -1,6 +1,7 @@
 package com.maritime.ingestion.service;
 
 import com.maritime.common.dto.VesselEvent;
+import com.maritime.common.kafka.EventTypes;
 import com.maritime.common.observability.CorrelationIds;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -141,7 +142,7 @@ public class AisSimulatorService {
                 .setSpeed(speed)
                 .setHeading(heading)
                 .setTimestamp(now)
-                .setEventType("AIS")
+                .setEventType(EventTypes.AIS)
                 .setSourceType(vessel.aisSource.name())
                 .build();
     }
