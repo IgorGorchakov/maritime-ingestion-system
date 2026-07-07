@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.maritime</groupId>
-        <artifactId>maritime-ingestion-platform</artifactId>
+        <artifactId>maritime-ingestion-system</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
